@@ -1,0 +1,19 @@
+fastapi==0.162.0
+starlette==1.9.0
+uvicorn[standard]==0.34.0
+python-multipart==0.0.32
+pydantic==2.10.6
+huggingface-hub==1.31.0
+transformers==5.20.2
+setuptools==84.2.1
+faster-whisper==1.2.1
+# Faster-Whisper 1.2.1 still passes metadata_errors to av.open; PyAV 19 removed it.
+av==18.1.0
+argostranslate @ https://codeload.github.com/argosopentech/argos-translate/tar.gz/17ed1a9b055c5ba1b51d76b683bbb0c64e2a4a88
+kokoro==0.9.4
+soundfile==0.13.1
+en-core-web-sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl#sha256=1932429db727d4bff3deed6b34cfc05df17794f4a52eeb26cf8928f7c1a0fb85
+numpy==2.2.3
+opencv-python-headless==4.11.0.86
+pytesseract==0.3.13
+demucs==4.0.1

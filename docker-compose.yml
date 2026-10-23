@@ -1,0 +1,68 @@
+services:
+  dub-studio:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    image: ghcr.io/miku-wwl/offline-dub-studio:local
+    container_name: offline-dub-studio
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:7860:7860"
+    environment:
+      APP_HOST: 0.0.0.0
+      APP_PORT: 7860
+      DATA_DIR: /data
+      MODELS_DIR: /models
+      OFFLINE_INFERENCE: ${OFFLINE_INFERENCE:-false}
+      OFFLINE_NETWORK: ${OFFLINE_NETWORK:-false}
+      MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-21474836480}
+      MAX_DURATION_SECONDS: ${MAX_DURATION_SECONDS:-43200}
+    volumes:
+      - ./data:/data
+      - ./models:/models
+    cpus: 8.0
+    mem_limit: 16g
+    shm_size: 1gb
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_ADMIN
+      - SETUID
+      - SETGID
+    tmpfs:
+      - /tmp:size=1g,mode=1777
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:7860/healthz', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 45s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+    networks:
+      - studio-net
+
+  dub-studio-tests:
+    profiles: [test]
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: test
+    image: ghcr.io/miku-wwl/offline-dub-studio:test
+    environment:
+      PYTHONPATH: /opt/studio/backend
+      DATA_DIR: /tmp/dub-studio-test-data
+      MODELS_DIR: /tmp/dub-studio-test-models
+    command: ["python", "-m", "pytest", "-q", "/opt/studio/backend/tests"]
+    networks:
+      - studio-net
+
+networks:
+  studio-net:
+    driver: bridge

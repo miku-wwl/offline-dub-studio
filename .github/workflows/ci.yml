@@ -1,0 +1,101 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: backend/requirements.lock.txt
+      - name: Install FFmpeg for generated-media integration tests
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - name: Install CPU PyTorch and backend dependencies
+        run: |
+          python -m pip install torch==2.14.1 torchaudio==2.11.0 --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -r backend/requirements-dev.txt
+          python -m pip check
+      - name: Run backend tests
+        env:
+          PYTHONPATH: backend
+          DATA_DIR: ${{ runner.temp }}/dub-studio-test-data
+          MODELS_DIR: ${{ runner.temp }}/dub-studio-test-models
+        run: python -m pytest -q backend/tests
+      - name: Check Python static errors
+        run: python -m ruff check --select E4,E7,E9,F backend/app backend/tests
+      - name: Audit Python dependencies
+        run: |
+          python -m pip freeze | grep -Ev '^(torch|torchaudio)(==| @)' > /tmp/auditable-installed-packages.txt
+          pip-audit --requirement /tmp/auditable-installed-packages.txt --no-deps
+          pip-audit --requirement backend/requirements-torch-audit.txt --no-deps
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+        working-directory: frontend
+      - run: npm test
+        working-directory: frontend
+      - run: npm run typecheck
+        working-directory: frontend
+      - run: npm run build
+        working-directory: frontend
+      - run: npx playwright install --with-deps chromium
+        working-directory: frontend
+      - run: npm run test:e2e
+        working-directory: frontend
+        env:
+          CI: true
+      - run: npm audit --audit-level=high
+        working-directory: frontend
+
+  docker-smoke:
+    runs-on: ubuntu-latest
+    needs: [backend, frontend]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build production image
+        run: docker build --target runtime --tag offline-dub-studio:ci .
+      - name: Smoke test the local API
+        shell: bash
+        run: |
+          docker run --detach --name dub-studio-smoke --publish 127.0.0.1:7861:7860 offline-dub-studio:ci
+          trap 'docker logs dub-studio-smoke || true; docker rm --force dub-studio-smoke || true' EXIT
+          for attempt in $(seq 1 45); do
+            if curl --fail --silent http://127.0.0.1:7861/api/v1/health; then exit 0; fi
+            sleep 2
+          done
+          docker logs dub-studio-smoke
+          exit 1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+        working-directory: frontend
+      - run: npx playwright install --with-deps chromium
+        working-directory: frontend
+      - name: Verify browser UI served by the production container
+        run: npm run test:e2e
+        working-directory: frontend
+        env:
+          CI: true
+          LIVE_APP_URL: http://127.0.0.1:7861

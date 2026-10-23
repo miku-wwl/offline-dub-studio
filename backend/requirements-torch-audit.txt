@@ -1,0 +1,4 @@
+# The PyTorch CPU index labels these wheels with a +cpu local version suffix.
+# Audit their corresponding public release versions against the PyPI advisory database.
+torch==2.14.1
+torchaudio==2.11.0
