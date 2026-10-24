@@ -8,6 +8,8 @@ Actual repaired stills at 20/42/54 seconds remove the previously legible Chinese
 
 Validation so far: 70 backend tests, Ruff, one frontend unit test, typecheck/build and security audits pass; fixture browser tests are 3 passed / 2 skipped. The final output must still be verified as 48 kHz stereo. Protected original, clip and Phase 2.5 evidence remain separate from new ignored artifacts. See [the detailed Phase 2.6 report](PHASE26_QUALITY_REPORT.md) for measured evidence, limitations, failure/retry history and the remaining acceptance boundary.
 
+Independent pre-export validation passed all 1,500 frames: zero changed unmasked pixels, 277 pixel-identical inactive frames, and all 146 protected-manifest entries unchanged. Actual dialogue/background WAVs are 48 kHz stereo without PCM clipping. These checks do not substitute for final MP4 decode, AAC levels or human review.
+
 ## Historical Phase 2.5 acceptance
 
 Validation date: 2026-10-24, Pacific/Auckland. Baseline: `1b873652f9f608afb34f10d461c8ddfe156217f7`.

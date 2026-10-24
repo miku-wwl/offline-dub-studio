@@ -11,7 +11,7 @@
 | Translation quality | PARTIAL | Actual glossary-assisted Argos plus Codex-proposed English edits; no human translation approval or scene-wide contextual model. |
 | Dialogue fitting | PASS | Actual 25-segment timeline: zero >20 ms collisions, max 0.000 s, zero tail truncation. Segmentation and editorial edits differ from Phase 2.5. Naturalness remains pending. |
 | Speaker/background quality | PENDING_HUMAN_REVIEW | Stable proposed voice mapping and real Demucs stems do not prove speaker identity or cinematic background preservation. |
-| 48 kHz output | PARTIAL | Implemented and tested actual generated 48 kHz stereo render; real fitted voices are 48 kHz. Private final MP4 is pending export. |
+| 48 kHz output | PARTIAL | Implemented and tested actual generated 48 kHz stereo render; actual dialogue/background WAVs are stereo 48 kHz without PCM clipping, and all fitted voices are non-silent at 48 kHz. Private final MP4 is pending export. |
 | Real 60-second pipeline | PARTIAL | All real local inference and repair completed; final export paused at review before host Docker socket startup failure. |
 | Recovery | PARTIAL | Old completed job/API/download passed earlier after recreation; current Docker startup is blocked, and new completed-output restart check remains pending. No runtime state was deleted. |
 | Automated validation | PASS | 70 backend tests, Ruff, one frontend unit test, typecheck/build, 3 fixture browser passes (2 production/private skips), Python/npm audits. |
@@ -19,6 +19,8 @@
 | Publication | NOT_RUN | No GHCR publication or release; code/main CI delivery is tracked separately from private acceptance. |
 
 See [the Phase 2.6 quality report](PHASE26_QUALITY_REPORT.md) for actual job IDs, preserved hashes, review provenance, failures/retries and remaining work. The following Phase 2.5 section is retained as historical evidence.
+
+Actual pre-export validation also passes all 1,500 repaired frames with unchanged unmasked pixels, all 277 inactive frames pixel identical and all 146 protected-manifest entries unchanged. It does not establish final encoded-output or perceptual quality.
 
 ## Historical Phase 2.5
 
