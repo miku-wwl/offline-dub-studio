@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Callable
 
@@ -16,7 +18,7 @@ from .domain import JobOptions
 from .media import MediaError, probe_media, run
 from .models import list_packs
 from .providers import ASRProvider, ProviderUnavailable, TTSProvider, TranslationProvider
-from .subtitles import detect_boxes, redact_video, write_ass
+from .subtitles import detect_boxes, redact_video, readable_caption_margin, write_ass, write_srt
 
 
 STAGES = ["inspect", "extract", "separate", "transcribe", "translate", "synthesize", "subtitle_processing", "render"]
@@ -29,6 +31,11 @@ class JobCancelled(RuntimeError):
 def _dump(path: Path, value: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _file_digest(path:Path) -> str:
+    with path.open("rb") as source:
+        return hashlib.file_digest(source,"sha256").hexdigest()
 
 
 class Pipeline:
@@ -52,6 +59,9 @@ class Pipeline:
         cached_stages = {s["name"]:s for s in (job.get("stages") or [])}
         for index, stage in enumerate(STAGES):
             self._checkpoint()
+            if stage=="synthesize" and options.transcript_review_required and not options.transcript_review_approved:
+                self.db.log(job_id,"info","Transcript and speaker assignments are ready for review before voice generation.")
+                return {"status":"awaiting_transcript_review"}
             if stage == "render" and not options.subtitle_review_approved:
                 self.db.log(job_id,"info","Final export is waiting for subtitle preview approval.")
                 return {"status":"awaiting_review"}
@@ -68,7 +78,13 @@ class Pipeline:
                             (job_id,stage,"running",now()))
             self._update_progress(job_id,stage,0,index/len(STAGES)*100)
             self.db.log(job_id,"info",f"Stage started: {stage}")
-            result = getattr(self,f"_stage_{stage}")(state)
+            started=time.perf_counter()
+            try:
+                result = getattr(self,f"_stage_{stage}")(state)
+            except BaseException:
+                self._record_performance(work,stage,time.perf_counter()-started,"failed_or_cancelled")
+                raise
+            self._record_performance(work,stage,time.perf_counter()-started,"completed")
             state["artifacts"].update(result)
             self.db.execute("UPDATE stages SET status='completed',progress=100,finished_at=?,artifacts_json=? WHERE job_id=? AND name=?",
                             (now(),json.dumps(result),job_id,stage))
@@ -87,6 +103,17 @@ class Pipeline:
             return {"status":"awaiting_review"}
         _dump(work / "pipeline-result.json", {"status":"completed","artifacts":state["artifacts"]})
         return {"status":"completed"}
+
+    def _record_performance(self,work:Path,stage:str,seconds:float,status:str):
+        path=work / "performance.json"
+        entries=json.loads(path.read_text(encoding="utf-8")) if path.exists() else []
+        entry={"stage":stage,"elapsed_seconds":round(seconds,3),"status":status,"finished_at":now()}
+        try:
+            entry["container_memory_peak_bytes"]=int(Path("/sys/fs/cgroup/memory.peak").read_text().strip())
+        except (OSError,ValueError):
+            pass
+        entries.append(entry)
+        _dump(path,entries)
 
     def _update_progress(self, job_id: str, stage: str, stage_progress: float, overall: float):
         self.db.execute("UPDATE jobs SET stage=?,progress=?,updated_at=? WHERE id=?",
@@ -196,7 +223,7 @@ class Pipeline:
                                   (STAGES.index("synthesize")+(index+1)/max(1,len(segments)))/len(STAGES)*100)
         duration=float(state["probe"]["duration"])
         dub=state["work"] / "dub.wav"
-        timeline=compose_timeline(segments,voice_files,duration,dub)
+        timeline=compose_timeline(segments,voice_files,duration,dub,self._checkpoint)
         for warning in timeline["warnings"]:
             self.db.log(state["work"].name,"warning",warning)
         if not segments:
@@ -207,7 +234,8 @@ class Pipeline:
     def _stage_subtitle_processing(self,state):
         options=state["options"]
         ass=state["work"] / "english-subtitles.ass"
-        write_ass(state["segments"],ass,options.subtitle_font_size,options.subtitle_margin_v)
+        srt=state["work"] / "english-subtitles.srt"
+        write_srt(state["segments"],srt)
         source=state["source"]
         warnings=[]
         if options.subtitle_mode=="none":
@@ -220,10 +248,43 @@ class Pipeline:
                 pass
             report={"mode":"none","soft_subtitles_removed":True,"hard_subtitles_processed":False,"warnings":[]}
         else:
-            boxes, warnings=detect_boxes(source,options.subtitle_regions,state["work"] / "ocr-trace.json")
+            def subtitle_progress(done,total,offset,weight):
+                fraction=offset+weight*min(1,done/max(1,total))
+                self._update_progress(state["work"].name,"subtitle_processing",fraction*100,
+                                      (STAGES.index("subtitle_processing")+fraction)/len(STAGES)*100)
+            boxes, warnings=detect_boxes(source,options.subtitle_regions,state["work"] / "ocr-trace.json",self._checkpoint,
+                                         lambda done,total:subtitle_progress(done,total,0,.8))
             video=state["work"] / "repaired-silent.mp4"
-            result=redact_video(source,video,boxes,state["work"] / "preview",options.subtitle_mode)
-            report={"mode":options.subtitle_mode,**result,"soft_subtitles_removed":True,"hard_subtitles_processed":bool(boxes),"warnings":warnings}
+            source_hash=_file_digest(source)
+            previous_path=state["work"] / "subtitle-report.json"
+            try:
+                previous=json.loads(previous_path.read_text(encoding="utf-8")) if previous_path.exists() else {}
+            except (OSError,json.JSONDecodeError):
+                previous={}
+            previous_video=Path(previous.get("output_video") or video)
+            same_regions=json.dumps(previous.get("regions"),sort_keys=True)==json.dumps(boxes,sort_keys=True)
+            if (previous.get("source_sha256")==source_hash and previous.get("mode")==options.subtitle_mode
+                    and same_regions and previous_video.is_file()
+                    and previous.get("repair_sha256")==_file_digest(previous_video)):
+                keys=("width","height","fps","frames_processed","masked_frames","unmasked_frames","regions",
+                      "mask_applied","output_video","technique")
+                result={key:previous[key] for key in keys}
+                result["repair_cache_reused"]=True
+                subtitle_progress(1,1,.8,.2)
+            else:
+                result=redact_video(source,video,boxes,state["work"] / "preview",options.subtitle_mode,self._checkpoint,
+                                    lambda done,total:subtitle_progress(done,total,.8,.2))
+                result["repair_cache_reused"]=False
+            video=Path(result["output_video"])
+            report={"mode":options.subtitle_mode,**result,"manual_search_regions":options.subtitle_regions,
+                    "source_sha256":source_hash,"repair_sha256":_file_digest(video),
+                    "soft_subtitles_removed":True,"hard_subtitles_processed":bool(boxes),"warnings":warnings}
+        margin=readable_caption_margin(int(state["probe"]["height"]),report.get("regions",[]),options.subtitle_margin_v)
+        write_ass(state["segments"],ass,options.subtitle_font_size,margin)
+        report["requested_subtitle_margin_v"]=options.subtitle_margin_v
+        report["effective_subtitle_margin_v"]=margin
+        if margin>options.subtitle_margin_v:
+            report["caption_placement_note"]="English captions are placed above the detected source subtitle band for readability."
         preview_video=video
         if state["segments"]:
             first=next((s for s in state["segments"] if s.get("translated_text")),None)
@@ -243,7 +304,7 @@ class Pipeline:
                     report["warnings"]=warnings
         path=state["work"] / "subtitle-report.json"
         _dump(path,report)
-        return {"subtitle_file":str(ass),"subtitle_report":str(path),"subtitle_video":str(video),
+        return {"subtitle_file":str(ass),"subtitle_srt":str(srt),"subtitle_report":str(path),"subtitle_video":str(video),
                 "subtitle_preview":str(state["work"] / "preview")}
 
     def _stage_render(self,state):
@@ -257,7 +318,7 @@ class Pipeline:
         bg_db=options.background_gain_db
         dlg_db=options.dialogue_gain_db
         run([settings.ffmpeg,"-y","-v","error","-i",str(bed),"-i",str(dub),"-filter_complex",
-             f"[0:a]volume={bg_db}dB[bg];[1:a]volume={dlg_db}dB[dlg];[bg][dlg]amix=inputs=2:duration=longest:dropout_transition=0,alimiter=limit=0.94[out]",
+             f"[0:a]volume={bg_db}dB[bg];[1:a]volume={dlg_db}dB[dlg];[bg][dlg]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0,alimiter=limit=0.94:level=0[out]",
              "-map","[out]","-ar",str(SAMPLE_RATE),"-c:a","pcm_s16le",str(mixed)],timeout=None)
         output=settings.data_dir / "output" / f"{state['work'].name}.mp4"
         subtitle=work / "english-subtitles.ass"

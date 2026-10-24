@@ -10,13 +10,14 @@ export type Job = {
   stages: Stage[]; transcript: Segment[]; speakers: Speaker[];
   logs: { timestamp: string; level: string; message: string }[]; download_url?: string | null;
   elapsed_seconds?: number | null; current_stage_elapsed_seconds?: number | null
-  subtitle_report?: { warnings?: string[]; hard_subtitles_processed?: boolean; mask_applied?: boolean; regions?: [number,number,number,number][] } | null
+  subtitle_report?: { warnings?: string[]; hard_subtitles_processed?: boolean; mask_applied?: boolean; caption_placement_note?: string; manual_search_regions?: [number,number,number,number][]; regions?: { start: number; end: number; boxes: [number,number,number,number][] }[] } | null
   media_info?: { width: number; height: number; duration: number } | null
 }
 export type ModelPack = {
   id: string; name: string; kind: string; ready: boolean; approx_size: string; license: string;
   access: string; note?: string | null
 }
+export type JobSummary = Pick<Job,'id'|'display_name'|'status'|'stage'|'progress'|'created_at'|'updated_at'|'error'|'download_url'>
 export type MediaAsset = {
   id: string; display_name: string; bytes: number; duration: number;
   width: number; height: number; has_audio: boolean; subtitle_streams: number
@@ -42,7 +43,7 @@ export const api = {
   diagnostics: () => request<Diagnostics>('/api/v1/diagnostics'),
   models: () => request<{ packs: ModelPack[]; operations: Record<string, { status: string; error?: string }> }>('/api/v1/models'),
   initializeModel: (id: string) => request(`/api/v1/models/${id}/initialize`, { method: 'POST' }),
-  jobs: () => request<{ jobs: Job[] }>('/api/v1/jobs'),
+  jobs: () => request<{ jobs: JobSummary[] }>('/api/v1/jobs'),
   job: (id: string) => request<Job>(`/api/v1/jobs/${id}`),
   upload: async (file: File) => {
     const form = new FormData(); form.append('file', file)
@@ -54,6 +55,7 @@ export const api = {
   cancel: (id: string) => request(`/api/v1/jobs/${id}/cancel`, { method: 'POST' }),
   resume: (id: string) => request(`/api/v1/jobs/${id}/resume`, { method: 'POST' }),
   approveSubtitles: (id: string) => request(`/api/v1/jobs/${id}/approve-subtitles`, { method: 'POST' }),
+  approveTranscript: (id: string) => request(`/api/v1/jobs/${id}/approve-transcript`, { method: 'POST' }),
   updateRegions: (id: string, regions: [number,number,number,number][]) => request(`/api/v1/jobs/${id}/subtitle-regions`, json('PUT', { regions })),
   editTranscript: (id: string, segments: unknown) => request<Job>(`/api/v1/jobs/${id}/transcript`, json('PUT', segments)),
   editSpeakers: (id: string, assignments: unknown) => request<Job>(`/api/v1/jobs/${id}/speakers`, json('PUT', { assignments })),

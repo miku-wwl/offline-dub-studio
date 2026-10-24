@@ -2,7 +2,7 @@
 
 Local-first Chinese-to-English video dubbing. The application combines local CPU speech recognition, Argos translation, Kokoro English voices, an optional Demucs music-vocal split, editable speaker assignments, hard-subtitle review/inpainting, and English subtitle burn-in.
 
-> The local CPU pipeline has completed an offline 35.9-second Mandarin fixture conversion, including ASR, Argos translation, Kokoro speech, Demucs stems, hard-subtitle processing, and burned English captions. This is sample-path evidence, not movie-quality acceptance. Automatic diarization, cinematic dialogue separation, and reliable subtitle reconstruction remain limited. No GHCR image has been published. See [implementation status](docs/IMPLEMENTATION_STATUS.md) and [acceptance report](docs/ACCEPTANCE_REPORT.md). The runtime image is several GB because it includes CPU PyTorch and FFmpeg.
+> Phase 2.5 adds safe inbox snapshots, temporal subtitle masks, transcript/speaker review before TTS, SRT export, and a reproducible real-video acceptance workflow. See [real-video acceptance](docs/REAL_VIDEO_ACCEPTANCE.md) for the supplied `test.webm` run and its evidence. Subjective audio/video quality requires human review; full-film processing remains gated on that review. No GHCR image has been published. The runtime image is several GB because it includes CPU PyTorch and FFmpeg.
 
 ## Quick start on Windows 11
 
@@ -33,9 +33,13 @@ The container output firewall blocks external traffic while the published localh
 
 1. Upload a short MP4 or select a file in the mounted inbox.
 2. Choose CPU Lite or Balanced, and choose Fast, Balanced, or no hard-subtitle removal.
-3. Start the job and inspect the source/OCR mask/inpainting/English subtitle preview.
-4. Inspect the preview and detected mask, adjust regions if needed, rebuild the preview, and approve export.
-5. Review the final audio and video, edit transcript/speaker voices if needed, then download the MP4.
+3. Start the job, review the translated transcript, assign stable speaker IDs and voices, save edits, and select **Generate English voices**.
+4. Inspect the source/OCR mask/inpainting/English subtitle preview. Draw search regions if needed, rebuild the preview, and approve export.
+5. Watch and listen to the final MP4 and inspect timing warnings before accepting it.
+
+Inbox imports copy into a private application-owned snapshot. Validation failures and interrupted copies leave the inbox original intact. Replacing an inbox file after import cannot change an already imported job's source. Reserve disk space for this additional copy.
+
+Subtitle search rectangles constrain per-frame OCR. They are not permanent masks: a box is active only in its recorded frame interval. Frames without detections remain unchanged in a lossless FFV1 intermediate; a no-detection job reuses the source directly. The final export is encoded once to H.264 with readable English captions. Both ASS and SRT remain in the job directory.
 
 Demucs separates music vocals rather than cinematic dialogue. The output bed can lose effects, and the vocal stem can retain music. Automatic speaker diarization is not enabled: the transcript defaults to `speaker_1`; users can assign IDs and distinct stable voices manually. OpenCV inpainting is a baseline and can damage detail or miss text. These are reviewable limitations, not quality guarantees.
 
@@ -44,10 +48,10 @@ Demucs separates music vocals rather than cinematic dialogue. The output bed can
 Copy the movie into `D:/workshop/oct/offline-dub-studio/data/inbox/movie.mp4`. In PowerShell, replace the filename and start time as needed:
 
 ```powershell
-docker compose exec dub-studio ffmpeg -y -ss 00:10:00 -i /data/inbox/movie.mp4 -t 60 -map 0:v:0 -map 0:a:0 -c:v libx264 -preset veryfast -crf 21 -c:a aac /data/inbox/movie-sample-60s.mp4
+docker compose exec --user 10001:10001 dub-studio ffmpeg -n -ss 00:10:00 -i /data/inbox/movie.mp4 -t 60 -map 0:v:0 -map 0:a:0 -c:v libx264 -preset veryfast -crf 21 -c:a aac /data/inbox/movie-sample-60s.mp4
 ```
 
-Refresh the inbox in the browser and import `movie-sample-60s.mp4`. Run the sample first; inspect recognition, translation, voices, retained sound, subtitle repair, and sync before processing the full movie. Once accepted, select `movie.mp4` from the inbox and repeat the workflow. A long movie can take hours on CPU; jobs and intermediate outputs are persistent.
+Refresh the inbox and import `movie-sample-60s.mp4`. Use Balanced for acceptance. Inspect recognition, translation, voices, retained sound, subtitle repair, and sync. Two-hour-film acceptance remains blocked until the sample passes human listening and viewing; no full film was started in Phase 2.5. Review disk requirements and cancellation limits in [limitations](docs/limitations.md).
 
 ## Local development and checks
 

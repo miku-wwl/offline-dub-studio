@@ -1,101 +1,50 @@
-# Acceptance report
+# Phase 2.5 acceptance report
 
-Validation date: 2026-10-24 (Pacific/Auckland). The fixture conversion is an actual local CPU run with container egress blocked; it does not establish movie-quality performance.
+Validation date: 2026-10-24, Pacific/Auckland. Baseline: `1b873652f9f608afb34f10d461c8ddfe156217f7`.
 
-```text
-PROJECT=offline-dub-studio
+**OVERALL_STATUS=PARTIAL.** The actual supplied video completed the local Balanced pipeline and produced a verified MP4. Timing collisions, imperfect Chinese subtitle restoration, and subjective listening/video approval remain open. No full-length movie, GHCR publication, or GitHub release was attempted.
 
-PHASE_1_STATUS=PASS
-PHASE_2_STATUS=PASS
-PHASE_3_STATUS=PARTIAL
-PHASE_4_STATUS=PARTIAL
-PHASE_5_STATUS=PARTIAL
-PHASE_6_STATUS=PARTIAL
+## Delivered engineering work
 
-DOCKER_BUILD_STATUS=PASS
-FRONTEND_BUILD_STATUS=PASS
-BACKEND_TEST_STATUS=PASS (17 passed)
-FRONTEND_TEST_STATUS=PASS (1 passed)
-BROWSER_E2E_STATUS=PASS (2 passed)
-REAL_LOCAL_ASR_STATUS=PASS
-REAL_LOCAL_TRANSLATION_STATUS=PASS
-REAL_LOCAL_TTS_STATUS=PASS
-AUDIO_SEPARATION_STATUS=PARTIAL (Demucs music-vocal split; not cinematic dialogue isolation)
-SPEAKER_DIARIZATION_STATUS=PARTIAL (manual assignment only)
-HARD_SUBTITLE_REMOVAL_STATUS=PARTIAL (OpenCV baseline processed; visible quality limitations)
-SUBTITLE_BURN_IN_STATUS=PASS
-FULL_PIPELINE_STATUS=PASS (35.934-second offline fixture job completed)
-CPU_ONLY_STATUS=PASS
-OFFLINE_INFERENCE_STATUS=PASS (ASR, Argos, Kokoro, Demucs, and API conversion with blocked egress)
-JOB_RECOVERY_STATUS=PASS (completed job and output survived container restart)
-GHCR_RELEASE_STATUS=NOT_RUN
+- Safe owned upload/import lifecycle: invalid inbox files survive, valid imports create stable independent snapshots, publication cannot overwrite existing media, and cleanup only removes app-owned unregistered files.
+- Timestamped OCR regions and exact frame intervals; editable manual search regions; no inherited masks on absent frames or later scenes; lossless intermediate and no repair encoding when no subtitles are detected.
+- Transcript/speaker approval before TTS, stable manual voice assignments, downstream retries with successful upstream stages retained, valid ASS/SRT and readable burn-in.
+- Bounded timeline audio buffers, explicit speech overflow/collision/truncation diagnostics, OCR/repair cache provenance, per-attempt stage timing and cgroup peak memory.
+- Patched `filelock==4.2.1`, installed-graph security auditing without ignored CVEs, and corrected CI container lifetime for production browser smoke checks.
+- Fixed the production UI history-selection crash caused by treating a job summary as complete detail; regression uses the sparse API response.
 
-REPOSITORY_URL=https://github.com/miku-wwl/offline-dub-studio
-FINAL_COMMIT_SHA=see final delivery report
-DOCKER_IMAGE=ghcr.io/miku-wwl/offline-dub-studio:local (local only; no GHCR publication)
-TEST_COUNT=20 (17 backend + 1 frontend unit + 2 browser E2E)
-KNOWN_LIMITATIONS=No automatic diarization; Demucs is not film-dialogue separation; OpenCV inpainting can smear image detail; fixture is read speech with a tone bed; MiniSBD 0.9.5 remains as an AGPL-3.0 transitive dependency and needs compliance review before redistribution; audio quality not human-listened
-USER_ACTION_REQUIRED=Provide an authorized 30–60-second movie clip; inspect and accept sample voices, retained ambience, inpainting, sync, and audio level before full-film processing
-OVERALL_STATUS=PARTIAL
-```
+## Real source and output
 
-## Implemented and verified
+| Item | Measured result |
+|---|---|
+| Original | `test.webm`, 95.748 s, VP9 1920×1080 at 25 fps / Opus stereo 48 kHz |
+| Original SHA-256 | `bb779354520eb5edd040910d970c41471235ad1f2b49e5d3d73abd3e9f1fc4d4` |
+| Selected source interval | 10.000–70.000 s |
+| Input clip | `data/inbox/test-60s.mp4`, exactly 60.000 s, H.264/AAC, same resolution/fps |
+| Job | `e47f9f3b-7236-4afe-8548-f1295d497e43`, Balanced, `completed_with_warnings` |
+| Providers | Faster-Whisper Small int8 CPU, Argos zh→en, Kokoro, Demucs htdemucs, OpenCV Balanced repair |
+| Final MP4 | `D:/workshop/oct/offline-dub-studio/data/acceptance/phase-2.5/dubbed-60s.mp4` |
+| Output size / SHA-256 | 18,261,468 bytes / `533dd7f1a0b14a65802907edc238b806f31d323f30ed103ccb7a9854abd1c58a` |
+| Local media integrity | PASS: full decode, codecs, dimensions, fps, A/V duration, packet timestamps, matching API-download hash |
+| Temporal safety | PASS: 459 inactive lossless-intermediate frames compared, zero changed |
+| Audio measurements | 27 non-silent generated segments; zero mixed-PCM clipped samples; -22.0 LUFS, -3.8 dBFS final true peak |
+| Timing | PARTIAL: 9 collisions >20 ms, maximum 1.085 s; no end tail loss |
+| Subtitle repair | PARTIAL: missed glyphs and smearing remain visible |
+| Assigned speakers | Three proposed manual groups with stable distinct voices; identities and automatic diarization are not verified |
+| Subjective quality | PENDING_HUMAN_REVIEW |
 
-- Docker-first FastAPI/React application with SQLite jobs, persistent intermediate stages, upload/inbox import, cancellation/resume routes, model readiness, preview approval, and artifact download.
-- CPU-local Faster-Whisper, Argos Translate, Kokoro, and Demucs adapters; no remote inference fallback. Argos sentence splitting is replaced at runtime with local punctuation-based splitting so translation does not trigger MiniSBD model downloads.
-- OCR, subtitle-region review, OpenCV inpainting, editable ASS generation, and burned English captions.
-- Container-level outbound firewall controlled by `OFFLINE_NETWORK`; Compose port remains available on `127.0.0.1:7860`.
-- CI workflows, pinned runtime dependencies, model manifests, documentation, and a Docker production image built locally.
+The source file was preserved and kept out of Git. All models and generated media remain ignored. Required artifact collection reported no missing files. The detailed source command, failures, model workflow, full stage timings, performance limits and human checklist are in [REAL_VIDEO_ACCEPTANCE.md](REAL_VIDEO_ACCEPTANCE.md).
 
-## Commands and results
+## Verification and delivery
 
-- `docker build --pull=false --target runtime --tag ghcr.io/miku-wwl/offline-dub-studio:local .` — passed.
-- `docker compose up -d --force-recreate dub-studio`; `Invoke-RestMethod http://127.0.0.1:7860/healthz` — passed.
-- `docker exec --user 10001:10001 offline-dub-studio python /data/fixtures/offline_smoke.py` — real ASR, Argos, Kokoro, and Demucs completed in offline mode.
-- Imported `fleurs-mandarin-36s-cc-by-test.mp4` through `/api/v1/media/import`; created job `b65032d4-253f-48d3-b424-aa4616886398`; reviewed its preview; approved test export; job completed.
-- Output: `data/output/b65032d4-253f-48d3-b424-aa4616886398.mp4`, 341,405 bytes, 35.934 seconds, H.264/AAC. The downloaded API artifact had the same SHA-256 as the stored file.
-- `pytest -q backend/tests` — 17 passed, one deprecation warning. Ruff CI selection — passed.
-- `npm test` — 1 passed; `npm run typecheck` — passed; `npm run build` — passed; `LIVE_APP_URL=http://127.0.0.1:7860 npm run test:e2e` — 2 passed.
-- `npm audit --registry=https://registry.npmjs.org --omit=dev` — 0 vulnerabilities.
-- Job status and output persisted after `docker compose restart dub-studio`; offline OUTPUT firewall remained active.
+Exact commands and test coverage are in [testing.md](testing.md). Machine-readable reports and logs live under ignored `data/acceptance/phase-2.5/`. A separate generated two-second fixture exercised queued cancel/resume/cancel without running model stages or changing its source. Recovery regression tests cover interrupted stages and existing valid caches. The production browser check verifies muted playback of the real private output; it cannot count as listening.
 
-## Remaining acceptance
+Dependency audit finds no known vulnerabilities among auditable installed packages and upstream CPU PyTorch versions. Argos 1.11.1's pinned upstream commit and the hash-pinned spaCy 3.8.0 model wheel are explicitly reported as unavailable to the PyPI audit. No CVE suppressions were added. MiniSBD remains an AGPL-3.0 transitive package; redistribution still requires the previously documented license/source review.
 
-- Phase 3 needs an ungated automatic diarization provider or an accepted user-gated model workflow.
-- Phase 4 needs more diverse real subtitles and human assessment of masking/reconstruction, timing, and text detection.
-- Phase 5 needs browser-driven end-to-end conversion through upload/configure/review/export, not only dashboard smoke plus API conversion.
-- Phase 6 needs a clean-machine build and release review. No GHCR login, image push, tag, or publication was performed. The Argos transitive MiniSBD package remains AGPL-3.0; source and license obligations must be resolved before redistribution.
-- User movie acceptance remains `PENDING_USER_MEDIA`.
+Repository: [miku-wwl/offline-dub-studio](https://github.com/miku-wwl/offline-dub-studio). Remote build/test evidence is the CI run for the final commit, linked in the delivery response and ignored `data/acceptance/phase-2.5/delivery.json`. [CI workflow history](https://github.com/miku-wwl/offline-dub-studio/actions/workflows/ci.yml). A local result alone does not assert GitHub Actions success.
 
-## Run the application
+## Acceptance boundary
 
-```powershell
-Set-Location D:/workshop/oct/offline-dub-studio
-docker compose build
-docker compose up -d
-Start-Process http://localhost:7860
-```
+Real provider execution and media integrity pass. English dub timing, manual speaker identity, cinematic background preservation, lip sync, translation/naturalness and visual reconstruction remain partial or pending human review. The 1,776.072 s processing figure sums all attempts, including rejected previews and cached retries; wall time including engineering/review was 4,326 s. The 338.660 s latest-entry sum includes caches and is not a fresh conversion benchmark. Peak observed cgroup memory was 2.527 GB; the 60-second lossless intermediate used 1.029 GB.
 
-In **Model readiness**, initialize the selected ASR model, Argos Chinese-to-English, Kokoro English voices, and Demucs while online. Models persist under `./models`; jobs and exports persist under `./data`.
-
-After initialization, use this project-root `.env` to enforce strict offline operation:
-
-```powershell
-@'
-OFFLINE_INFERENCE=true
-OFFLINE_NETWORK=true
-'@ | Set-Content -Encoding ascii .env
-docker compose up -d --force-recreate
-```
-
-Verify `offline_inference: true` in `/api/v1/diagnostics`, and confirm `http://localhost:7860/healthz` remains available.
-
-## Import an authorized movie and run a 60-second sample
-
-Copy an MP4 you are authorized to process into `D:/workshop/oct/offline-dub-studio/data/inbox/movie.mp4`. Extract a sample around a representative scene; substitute the timecode:
-
-```powershell
-docker compose exec dub-studio ffmpeg -y -ss 00:10:00 -i /data/inbox/movie.mp4 -t 60 -map 0:v:0 -map 0:a:0 -c:v libx264 -preset veryfast -crf 21 -c:a aac /data/inbox/movie-sample-60s.mp4
-```
-
-In the browser, refresh the inbox, import `movie-sample-60s.mp4`, choose Chinese → English and CPU Lite for the first run, choose a subtitle-removal mode, and start the job. Inspect the transcript, voices, audio bed, mask, repaired still, English caption, and sync. Approve export only after review, then play and listen to the downloadable MP4. If the sample is acceptable, select `movie.mp4` in the inbox and repeat the same workflow for the full film. Full-length CPU conversion may take hours; keep the container running and retain the persistent `data` and `models` folders.
+Open the final MP4 and listen to the source/stems/dub, then inspect all scenes. Native Windows Media Player playback is not claimed from FFmpeg or Chromium evidence. Two-hour acceptance remains blocked by the sample quality gate and unresolved sustained storage/memory/cancellation risks. No full film was started.

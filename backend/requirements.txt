@@ -7,6 +7,7 @@ huggingface-hub==1.31.0
 transformers==5.20.2
 setuptools==84.2.1
 faster-whisper==1.2.1
+filelock==4.2.1
 # Faster-Whisper 1.2.1 still passes metadata_errors to av.open; PyAV 19 removed it.
 av==18.1.0
 argostranslate @ https://codeload.github.com/argosopentech/argos-translate/tar.gz/17ed1a9b055c5ba1b51d76b683bbb0c64e2a4a88

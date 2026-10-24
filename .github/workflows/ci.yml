@@ -20,7 +20,7 @@ jobs:
           cache: pip
           cache-dependency-path: backend/requirements.lock.txt
       - name: Install FFmpeg for generated-media integration tests
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg tesseract-ocr tesseract-ocr-chi-sim fonts-noto-cjk
       - name: Install CPU PyTorch and backend dependencies
         run: |
           python -m pip install torch==2.14.1 torchaudio==2.11.0 --index-url https://download.pytorch.org/whl/cpu
@@ -31,14 +31,12 @@ jobs:
           PYTHONPATH: backend
           DATA_DIR: ${{ runner.temp }}/dub-studio-test-data
           MODELS_DIR: ${{ runner.temp }}/dub-studio-test-models
+          OMP_THREAD_LIMIT: '1'
         run: python -m pytest -q backend/tests
       - name: Check Python static errors
-        run: python -m ruff check --select E4,E7,E9,F backend/app backend/tests
+        run: python -m ruff check --select E4,E7,E9,F backend/app backend/tests scripts/validate_acceptance.py scripts/audit_dependencies.py
       - name: Audit Python dependencies
-        run: |
-          python -m pip freeze | grep -Ev '^(torch|torchaudio)(==| @)' > /tmp/auditable-installed-packages.txt
-          pip-audit --requirement /tmp/auditable-installed-packages.txt --no-deps
-          pip-audit --requirement backend/requirements-torch-audit.txt --no-deps
+        run: python scripts/audit_dependencies.py
 
   frontend:
     runs-on: ubuntu-latest
@@ -77,7 +75,6 @@ jobs:
         shell: bash
         run: |
           docker run --detach --name dub-studio-smoke --publish 127.0.0.1:7861:7860 offline-dub-studio:ci
-          trap 'docker logs dub-studio-smoke || true; docker rm --force dub-studio-smoke || true' EXIT
           for attempt in $(seq 1 45); do
             if curl --fail --silent http://127.0.0.1:7861/api/v1/health; then exit 0; fi
             sleep 2
@@ -99,3 +96,8 @@ jobs:
         env:
           CI: true
           LIVE_APP_URL: http://127.0.0.1:7861
+      - name: Clean up smoke container
+        if: always()
+        run: |
+          docker logs dub-studio-smoke || true
+          docker rm --force dub-studio-smoke || true

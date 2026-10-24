@@ -74,7 +74,14 @@ class ASRProvider:
             from faster_whisper import WhisperModel
         except ImportError as exc:
             raise ProviderUnavailable("Faster-Whisper is missing from the application image.") from exc
-        model = WhisperModel(str(model_dir), device="cpu", compute_type="int8", cpu_threads=effective_cpu_count())
+        threads=effective_cpu_count()
+        try:
+            limit=int(os.environ.get("OMP_THREAD_LIMIT","0"))
+            if limit>0:
+                threads=min(threads,limit)
+        except ValueError:
+            pass
+        model = WhisperModel(str(model_dir), device="cpu", compute_type="int8", cpu_threads=threads)
         lang = "zh" if source_language == "zh" else "en"
         segments, info = model.transcribe(str(audio_path), language=lang, beam_size=5,
                                            vad_filter=True, condition_on_previous_text=True)
@@ -88,9 +95,13 @@ class ASRProvider:
                          "end":max(float(seg.end),float(seg.start)+0.05),"source_text":text,
                          "translated_text":"","speaker_id":"speaker_1",
                          "asr_quality":round(float(np.exp(min(0.0,avg_logprob))),4)})
+        if not rows:
+            raise RuntimeError(f"ASR returned no speech segments with {model_id} ({threads} CPU threads). "
+                               f"VAD retained {getattr(info,'duration_after_vad','unknown')} seconds. "
+                               f"Inspect {audio_path} and the source audio, verify language/model readiness and CPU/OpenMP limits, then resume this stage.")
         return {"segments":rows,"language":getattr(info,"language",lang),
                 "language_probability":float(getattr(info,"language_probability",0.0)),
-                "provider":"faster-whisper","model":model_id,"compute":"cpu-int8"}
+                "provider":"faster-whisper","model":model_id,"compute":"cpu-int8","cpu_threads":threads}
 
 
 class TranslationProvider:

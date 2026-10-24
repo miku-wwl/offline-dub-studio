@@ -1,5 +1,5 @@
 import { ChangeEvent, PointerEvent as ReactPointerEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { api, Diagnostics, Job, MediaAsset, ModelPack, Segment, Voice } from './api'
+import { api, Diagnostics, Job, JobSummary, MediaAsset, ModelPack, Segment, Voice } from './api'
 
 const required = ['translation-zh-en', 'tts-kokoro-en', 'separation-htdemucs']
 const stageNames: Record<string, string> = {
@@ -19,7 +19,7 @@ const active = (status: string) => ['queued', 'running', 'cancelling'].includes(
 export default function App() {
   const [packs, setPacks] = useState<ModelPack[]>([])
   const [operations, setOperations] = useState<Record<string, { status: string; error?: string }>>({})
-  const [jobs, setJobs] = useState<Job[]>([])
+  const [jobs, setJobs] = useState<JobSummary[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [detail, setDetail] = useState<Job | null>(null)
   const [inbox, setInbox] = useState<{ filename: string; bytes: number }[]>([])
@@ -61,7 +61,7 @@ export default function App() {
     return () => { alive = false; window.clearInterval(id) }
   }, [selectedId])
   const transcriptSignature = JSON.stringify(detail?.transcript ?? [])
-  const regionSignature = JSON.stringify(detail?.subtitle_report?.regions ?? [])
+  const regionSignature = JSON.stringify(detail?.subtitle_report?.manual_search_regions ?? [])
   const speakerSignature = JSON.stringify(detail?.speakers ?? [])
   useEffect(() => { setEditSegments(detail?.transcript ?? []) }, [detail?.id, transcriptSignature])
   useEffect(() => {
@@ -69,13 +69,13 @@ export default function App() {
     for (const speaker of detail?.speakers ?? []) next[speaker.speaker_id] = speaker.voice_id
     setVoiceEdits(next)
   }, [detail?.id, speakerSignature])
-  useEffect(() => { setRegions(detail?.subtitle_report?.regions ?? []); setSelection(null) }, [detail?.id, regionSignature])
+  useEffect(() => { setRegions(detail?.subtitle_report?.manual_search_regions ?? []); setSelection(null) }, [detail?.id, regionSignature])
 
   const allRequired = useMemo(() => {
     const asrId = profile === 'cpu-lite' ? 'asr-tiny' : 'asr-small'
     return [asrId, ...required].every(id => packs.find(p => p.id === id)?.ready)
   }, [packs, profile])
-  const selectedJob = detail ?? jobs.find(j => j.id === selectedId) ?? null
+  const selectedJob = detail?.id===selectedId ? detail : null
 
   async function runAction(label: string, action: () => Promise<unknown>) {
     setBusy(label); setError('')
@@ -98,7 +98,7 @@ export default function App() {
     await runAction('Creating conversion', async () => {
       const result = await api.createJob(asset.id, {
         source_language: 'zh', target_language: 'en', profile,
-        subtitle_mode: subtitleMode, manual_speaker_assignment: true,
+        subtitle_mode: subtitleMode, manual_speaker_assignment: true, transcript_review_required: true,
         voice_assignments: { 'speaker_1': 'af_heart' },
         subtitle_font_size: subtitleFontSize, subtitle_margin_v: subtitleMarginV,
         dialogue_gain_db: dialogueGainDb, background_gain_db: backgroundGainDb,
@@ -217,9 +217,15 @@ export default function App() {
       <div className="job-overview"><StatusPill status={selectedJob.status} /><span>{stageNames[selectedJob.stage] ?? selectedJob.stage}</span><span className="elapsed-display">Elapsed {prettyElapsed(selectedJob.elapsed_seconds)}</span><span className="elapsed-display">This stage {prettyElapsed(selectedJob.current_stage_elapsed_seconds)}</span><b>{Math.round(selectedJob.progress)}%</b></div>
       <div className="progress-track"><div style={{ width: `${Math.max(0,Math.min(100,selectedJob.progress))}%` }} /></div>
       <div className="stage-grid">{selectedJob.stages.map(stage => <div className={`stage-chip ${stage.status}`} key={stage.name}><i />{stageNames[stage.name] ?? stage.name}</div>)}</div>
+      {selectedJob.status==='awaiting_transcript_review' && <section className="subtitle-review">
+        <div className="review-heading"><div><h3>Review dialogue and speakers</h3><p>Check the translated segments and assign stable speaker IDs and voices below. Speaker identity needs your listening review.</p></div>
+          <button className="button dark" disabled={Boolean(busy)} onClick={() => void runAction('Approving dialogue',() => api.approveTranscript(selectedJob.id))}>Generate English voices <span>→</span></button>
+        </div>
+      </section>}
       {selectedJob.error && <div className="alert compact-alert"><span>!</span>{selectedJob.error}</div>}
       {selectedJob.stages.some(stage => stage.name==='subtitle_processing' && stage.status==='completed') && selectedJob.options.subtitle_mode!=='none' && <section className="subtitle-review">
-        <div className="review-heading"><div><p className="eyebrow">REVIEW BEFORE EXPORT</p><h3>Check subtitle removal</h3><p>Drag over any missed hardcoded subtitle on the source frame. Adjusted regions are reprocessed before you approve the final MP4.</p></div>
+        {selectedJob.subtitle_report?.caption_placement_note && <p>{selectedJob.subtitle_report.caption_placement_note}</p>}
+        <div className="review-heading"><div><p className="eyebrow">REVIEW BEFORE EXPORT</p><h3>Check subtitle removal</h3><p>Drag over the subtitle area to set an OCR search region. Only frames with detected Chinese text are masked. Review the repair before approving the final MP4.</p></div>
           {selectedJob.status==='awaiting_review' && <button className="button dark" disabled={Boolean(busy)} onClick={() => void runAction('Approving export',() => api.approveSubtitles(selectedJob.id))}>Looks good · export MP4 <span>→</span></button>}
         </div>
         <div className="review-grid"><figure><div className="image-select" onPointerDown={startRegion} onPointerUp={finishRegion}>
@@ -266,6 +272,7 @@ export default function App() {
     </section>}
 
     <section className="recent-section"><div className="section-heading"><div><p className="eyebrow">YOUR WORKSPACE</p><h2>Recent conversions</h2></div><span className="recent-count">{jobs.length} saved</span></div>
+      {selectedId && !selectedJob && <p role="status">Loading conversion details…</p>}
       {jobs.length ? <div className="recent-list">{jobs.map(job => <button className={`recent-row ${selectedId===job.id?'selected':''}`} key={job.id} onClick={() => setSelectedId(job.id)}><span className="video-icon">▶</span><span className="recent-name"><b>{job.display_name}</b><small>{new Date(job.created_at).toLocaleString()}</small></span><span className="recent-stage">{stageNames[job.stage] ?? job.stage}</span><StatusPill status={job.status} /><span className="recent-progress">{Math.round(job.progress)}%</span></button>)}</div> : <div className="empty-state"><span>▣</span><b>Your conversions will appear here</b><p>Jobs and stage checkpoints persist across container restarts.</p></div>}
     </section>
 

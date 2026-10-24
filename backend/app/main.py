@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import mimetypes
+import os
 import shutil
+import tempfile
 import threading
 import uuid
 from contextlib import asynccontextmanager
@@ -21,6 +23,7 @@ from .manager import JobManager
 from .media import MediaError, probe_media, require_tools
 from .models import MODEL_PACKS, initialize, list_packs
 from .providers import VOICE_CHOICES
+from .pipeline import STAGES
 
 
 settings.prepare()
@@ -52,6 +55,10 @@ class ImportMedia(BaseModel):
 
 class VoiceAssignments(BaseModel):
     assignments: dict[str,SpeakerEdit]
+
+
+class RetryStage(BaseModel):
+    stage: str
 
 
 class SubtitleRegions(BaseModel):
@@ -117,11 +124,11 @@ def _asset(asset_id:str):
     return row
 
 
-def _store_media(path:Path,display_name:str,media_id:str|None=None)->dict:
+def _store_media(path:Path,display_name:str,media_id:str|None=None,*,probe:dict|None=None)->dict:
+    """Register media. Validation never grants ownership of the supplied path."""
     try:
-        probe=probe_media(path)
+        probe=probe if probe is not None else probe_media(path)
     except MediaError as exc:
-        path.unlink(missing_ok=True)
         raise HTTPException(422,str(exc)) from exc
     media_id=media_id or str(uuid.uuid4())
     size=path.stat().st_size
@@ -132,32 +139,47 @@ def _store_media(path:Path,display_name:str,media_id:str|None=None)->dict:
             "has_audio":probe["has_audio"],"subtitle_streams":len(probe["subtitle_streams"])}
 
 
+def _publish_media(temp:Path,display_name:str)->dict:
+    """Publish an app-owned snapshot without replacing an existing asset."""
+    media_id=str(uuid.uuid4())
+    destination=settings.uploads_dir / f"{media_id}{Path(display_name).suffix.lower()}"
+    try:
+        probe=probe_media(temp)
+    except MediaError as exc:
+        raise HTTPException(422,str(exc)) from exc
+    # link() is atomic and fails if the destination exists. This link is to the
+    # private copied upload, never to the user's inbox file.
+    os.link(temp,destination)
+    try:
+        return _store_media(destination,display_name,media_id,probe=probe)
+    except BaseException:
+        destination.unlink(missing_ok=True)
+        raise
+
+
 @app.post("/api/v1/media/upload",status_code=201)
 async def upload_media(file:UploadFile=File(...)):
     name=Path(file.filename or "video.mp4").name
     suffix=Path(name).suffix.lower()
     if suffix not in {".mp4",".m4v",".mov",".mkv",".webm"}:
         raise HTTPException(415,"Choose a video file (MP4, M4V, MOV, MKV, or WebM).")
-    media_id=str(uuid.uuid4())
-    destination=settings.uploads_dir / f"{media_id}{suffix}"
-    temp=destination.with_suffix(destination.suffix+".uploading")
+    fd,temp_name=tempfile.mkstemp(prefix="upload-",suffix=suffix+".uploading",dir=settings.uploads_dir)
+    temp=Path(temp_name)
     size=0
     try:
-        with temp.open("wb") as out:
+        with os.fdopen(fd,"wb") as out:
             while chunk:=await file.read(1024*1024):
                 size+=len(chunk)
                 if size>settings.max_upload_bytes:
                     raise HTTPException(413,"Upload exceeds the configured size limit.")
                 out.write(chunk)
+            out.flush()
+            os.fsync(out.fileno())
         if size==0:
             raise HTTPException(400,"The uploaded file is empty.")
-        temp.replace(destination)
-        return _store_media(destination,name,media_id)
-    except Exception:
-        temp.unlink(missing_ok=True)
-        destination.unlink(missing_ok=True)
-        raise
+        return _publish_media(temp,name)
     finally:
+        temp.unlink(missing_ok=True)
         await file.close()
 
 
@@ -184,7 +206,24 @@ def import_media(request:ImportMedia):
         raise HTTPException(400,"Only regular files directly inside the mounted input folder can be imported.")
     if resolved.stat().st_size>settings.max_inbox_bytes:
         raise HTTPException(413,"Inbox file exceeds the configured size limit.")
-    return _store_media(resolved,filename)
+    if resolved.suffix.lower() not in {".mp4",".m4v",".mov",".mkv",".webm"}:
+        raise HTTPException(415,"Choose a video file (MP4, M4V, MOV, MKV, or WebM).")
+    if shutil.disk_usage(settings.uploads_dir).free<resolved.stat().st_size+64*1024**2:
+        raise HTTPException(507,"Not enough disk space for an independent media snapshot. Free space in the data volume and retry; the inbox source is unchanged.")
+    fd,temp_name=tempfile.mkstemp(prefix="import-",suffix=resolved.suffix+".uploading",dir=settings.uploads_dir)
+    temp=Path(temp_name)
+    try:
+        with os.fdopen(fd,"wb") as out,resolved.open("rb") as source:
+            before=os.fstat(source.fileno())
+            shutil.copyfileobj(source,out,length=1024*1024)
+            after=os.fstat(source.fileno())
+            if (before.st_size,before.st_mtime_ns,before.st_ctime_ns)!=(after.st_size,after.st_mtime_ns,after.st_ctime_ns):
+                raise HTTPException(409,"The inbox file changed during import. Wait for copying to finish and retry.")
+            out.flush()
+            os.fsync(out.fileno())
+        return _publish_media(temp,filename)
+    finally:
+        temp.unlink(missing_ok=True)
 
 
 @app.post("/api/v1/jobs",status_code=201)
@@ -301,6 +340,39 @@ def approve_subtitles(job_id:str):
     db.execute("UPDATE jobs SET options_json=?,status='queued',stage='queued',updated_at=? WHERE id=?",
                (json.dumps(options),now(),job_id))
     db.log(job_id,"info","User approved the subtitle preview; final export queued.")
+    manager.enqueue(job_id)
+    return {"id":job_id,"status":"queued"}
+
+
+@app.post("/api/v1/jobs/{job_id}/retry-stage")
+def retry_stage(job_id:str,request:RetryStage):
+    row=db.one("SELECT status,options_json FROM jobs WHERE id=?",(job_id,))
+    if not row:
+        raise HTTPException(404,"Job not found")
+    if row["status"] in {"running","queued","cancelling"}:
+        raise HTTPException(409,"Wait for active processing to stop before retrying a stage.")
+    if request.stage not in STAGES:
+        raise HTTPException(422,"Choose a known pipeline stage: "+", ".join(STAGES))
+    options=json.loads(row["options_json"])
+    if STAGES.index(request.stage)<=STAGES.index("translate"):
+        options["transcript_review_approved"]=False
+        db.execute("UPDATE jobs SET options_json=? WHERE id=?",(json.dumps(options),job_id))
+    _requeue_edited_job(job_id,STAGES[STAGES.index(request.stage):],f"Retry requested from {request.stage}; successful earlier stage artifacts are retained.")
+    return {"id":job_id,"status":"queued"}
+
+
+@app.post("/api/v1/jobs/{job_id}/approve-transcript")
+def approve_transcript(job_id:str):
+    row=db.one("SELECT status,options_json FROM jobs WHERE id=?",(job_id,))
+    if not row:
+        raise HTTPException(404,"Job not found")
+    if row["status"]!="awaiting_transcript_review":
+        raise HTTPException(409,"Transcript approval is available after translation completes.")
+    options=json.loads(row["options_json"])
+    options["transcript_review_approved"]=True
+    db.execute("UPDATE jobs SET options_json=?,status='queued',stage='queued',updated_at=? WHERE id=?",
+               (json.dumps(options),now(),job_id))
+    db.log(job_id,"info","Transcript and speaker mapping approved for local voice generation; subjective voice identity still requires listening.")
     manager.enqueue(job_id)
     return {"id":job_id,"status":"queued"}
 

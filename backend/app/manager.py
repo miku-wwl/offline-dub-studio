@@ -18,6 +18,7 @@ class JobManager:
         self.stopping=threading.Event()
 
     def start(self):
+        self.stopping.clear()
         self.db.init()
         interrupted=self.db.query("SELECT id FROM jobs WHERE status IN ('running','cancelling')")
         for row in interrupted:
@@ -31,6 +32,8 @@ class JobManager:
 
     def stop(self):
         self.stopping.set()
+        if self.thread and self.thread.is_alive():
+            self.thread.join(timeout=1)
 
     def enqueue(self,job_id:str):
         self.queue.put(job_id)
@@ -55,9 +58,10 @@ class JobManager:
         try:
             pipeline=Pipeline(self.db,lambda: bool((self.db.one("SELECT cancel_requested FROM jobs WHERE id=?",(job_id,)) or {}).get("cancel_requested")))
             result=pipeline.run(job)
-            if result.get("status")=="awaiting_review":
-                self.db.execute("UPDATE jobs SET status='awaiting_review',stage='awaiting_review',updated_at=? WHERE id=?",(now(),job_id))
-                self.db.log(job_id,"info","Review the subtitle mask and inpainting preview, then approve export.")
+            if result.get("status") in {"awaiting_review","awaiting_transcript_review"}:
+                status=result["status"]
+                self.db.execute("UPDATE jobs SET status=?,stage=?,updated_at=? WHERE id=?",(status,status,now(),job_id))
+                self.db.log(job_id,"info","Review transcript/speakers before TTS." if status=="awaiting_transcript_review" else "Review the subtitle mask and inpainting preview, then approve export.")
                 return
             report_path=settings.jobs_dir / job_id / "subtitle-report.json"
             warnings=[]

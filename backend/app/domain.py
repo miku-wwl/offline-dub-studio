@@ -19,6 +19,8 @@ class JobOptions(BaseModel):
     subtitle_margin_v: int = Field(default=44, ge=0, le=300)
     resume_from: str | None = None
     subtitle_review_approved: bool = False
+    transcript_review_required: bool = False
+    transcript_review_approved: bool = False
 
 
 class SegmentEdit(BaseModel):

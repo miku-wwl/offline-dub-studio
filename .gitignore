@@ -17,6 +17,8 @@ models/
 *.mp4
 *.mkv
 *.mov
+*.webm
+*.m4v
 *.wav
 *.flac
 *.argosmodel
