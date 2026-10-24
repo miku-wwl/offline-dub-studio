@@ -37,7 +37,9 @@ The source file was preserved and kept out of Git. All models and generated medi
 
 ## Verification and delivery
 
-Exact commands and test coverage are in [testing.md](testing.md). Machine-readable reports and logs live under ignored `data/acceptance/phase-2.5/`. A separate generated two-second fixture exercised queued cancel/resume/cancel without running model stages or changing its source. Recovery regression tests cover interrupted stages and existing valid caches. The production browser check verifies muted playback of the real private output; it cannot count as listening.
+Exact commands and test coverage are in [testing.md](testing.md). Machine-readable reports and logs live under ignored `data/acceptance/phase-2.5/`. GitHub verified 46 backend tests, 1 frontend unit test, typecheck/build, Ruff, pip check and audits on implementation commit `039dae1`. A separate generated two-second fixture exercised queued cancel/resume/cancel without running model stages or changing its source. Recovery regression tests cover interrupted stages and existing valid caches.
+
+The production private-output browser check initially reproduced the job-summary crash. Its fix passes the sparse-response browser regression, but the final local production rerun and completed-job post-restart API lookup remain blocked by Docker Desktop's inaccessible `sailor-ingest.sock` before engine startup. Automatic approval rejected socket deletion. Actual MP4 direct-file Chromium playback independently passed (muted advancement, no media error, 60 s, 1920×1080), with actual final stills at 10/50 s. This does not establish production UI recovery or human listening. Browser/recovery acceptance is therefore PARTIAL until the local Docker runtime is restored.
 
 Dependency audit finds no known vulnerabilities among auditable installed packages and upstream CPU PyTorch versions. Argos 1.11.1's pinned upstream commit and the hash-pinned spaCy 3.8.0 model wheel are explicitly reported as unavailable to the PyPI audit. No CVE suppressions were added. MiniSBD remains an AGPL-3.0 transitive package; redistribution still requires the previously documented license/source review.
 

@@ -52,13 +52,22 @@ npm test
 npm run typecheck
 npm run build
 $env:LIVE_APP_URL='http://127.0.0.1:7860'
+$env:LIVE_ACCEPTANCE_JOB_ID='e47f9f3b-7236-4afe-8548-f1295d497e43'
 npm run test:e2e
 npm audit --registry=https://registry.npmjs.org --audit-level=high
 ```
 
-Local results: 44 backend tests, 1 frontend unit test, 3 browser tests; typecheck/build, Ruff, `pip check`, and dependency audits passed. `filelock==4.2.1` replaces vulnerable 3.32.3; no vulnerability identifiers are suppressed. The two upstream direct builds (Argos and the spaCy language wheel) are explicitly reported as unavailable to the PyPI audit, while their immutable URLs/checksums remain pinned.
+Results on implementation commit `039dae17044254d4c8a20f3370c3ece166c393bc`: GitHub backend **46 passed** (one Starlette/httpx deprecation warning), Ruff and both Python audits passed; frontend unit **1 passed**, typecheck/build and npm audit passed. Local earlier Docker runs had 44 backend tests before the last two regressions; the final 46-test source suite was verified on GitHub. `filelock==4.2.1` replaces vulnerable 3.32.3; no vulnerability identifiers are suppressed. The two upstream direct builds (Argos and the spaCy language wheel) are explicitly reported as unavailable to the PyPI audit, while their immutable URLs/checksums remain pinned.
 
-A generated two-second navy/tone fixture separately exercised the real API's queued cancel -> resume -> cancel lifecycle while the real-video job was busy. No inference stages executed for that fixture and its source hash was preserved. Restart/interrupted-stage and valid-cache recovery are also regression-tested. The real completed job is checked again after a container restart.
+The final local UI unit/type/build checks passed; its fixture-driven browser tests were **2 passed / 2 skipped** without a running Docker service. GitHub's frontend job likewise runs two fixtures and skips the live-only checks; the production smoke job adds the live container dashboard check. Private video and models are never uploaded to CI, so its real-output playback test is intentionally skipped there.
+
+[Implementation CI run 40060528459](https://github.com/miku-wwl/offline-dub-studio/actions/runs/40060528459) completed successfully on `039dae1`: backend, frontend, and production Docker smoke all passed. Production browser results were **3 passed / 1 skipped** (the private-video test). The delivery response and ignored `delivery.json` identify the subsequent documentation commit's separately verified final CI run.
+
+The first local real-output production-browser attempt reproduced the sparse-summary crash. The fix and sparse-response regression are committed, but the local real-output E2E rerun and actual completed-job restart lookup were blocked by Docker Desktop failing before its engine starts: `sailor-ingest.sock` cannot be renamed/accessed. Normal stop/start failed; official CLI forced exit succeeded, but restart reproduced the same socket failure. Automatic approval rejected deleting that runtime socket. No Docker reset, disk deletion, or changes to other workloads were made. Restore Docker Desktop, then rerun the command above and check the job download after `docker compose restart dub-studio`.
+
+As independent media evidence, ignored `direct-playback.cjs` opened the actual final MP4 directly in Chromium, muted playback advanced beyond 0.5 s, duration was 60 s, dimensions 1920×1080, readyState 4 and media error null. It saved actual final-frame screenshots at 10 and 50 s. This proves private-file browser decoding; it does not assert production UI or post-restart API success and does not count as listening. The final delivery records these limits separately.
+
+A generated two-second navy/tone fixture separately exercised the real API's queued cancel -> resume -> cancel lifecycle while the real-video job was busy. No inference stages executed for that fixture and its source hash was preserved. Restart/interrupted-stage and valid-cache recovery are regression-tested. Post-restart access to this real completed job remains pending the Docker Desktop recovery described above.
 
 Jobs created from the browser now pause at `awaiting_transcript_review`. API clients opt in with `transcript_review_required=true`, save edits using `PUT /jobs/{id}/transcript` and `/speakers`, and continue using `POST /jobs/{id}/approve-transcript`. The existing subtitle preview and `approve-subtitles` gate remain separate. `POST /jobs/{id}/retry-stage` with `{"stage":"transcribe"}` invalidates that stage and its downstream stages while retaining successful earlier artifacts. Active jobs reject stage retries.
 

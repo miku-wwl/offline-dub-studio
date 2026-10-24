@@ -63,6 +63,10 @@ Open `D:/workshop/oct/offline-dub-studio/data/acceptance/phase-2.5/dubbed-60s.mp
 | Chinese subtitle restoration | PARTIAL | Actual text was masked and repaired, but inspected previews retain missed glyphs and visible smearing. |
 | Background, residual Mandarin, naturalness and lip sync | PENDING_HUMAN_REVIEW | Signal measurements and muted playback cannot establish perceptual quality. |
 
+Direct-file Chromium playback of the actual final MP4 advanced beyond 0.5 s, reported 60 s, 1920×1080, readyState 4 and no media error (`direct-chromium-playback.json`). Actual final stills at 10 and 50 s show English above the source band, remaining Chinese glyphs and inaccurate/awkward translated phrases. Translation fidelity is not accepted by the mechanically valid subtitle check.
+
+The final local production-UI rerun and completed-job post-restart API check were blocked by Docker Desktop's `sailor-ingest.sock` startup failure after the output was already downloaded and validated. Official CLI forced exit succeeded, but restarting reproduced the socket failure; automatic approval rejected deleting the runtime socket. No reset or Docker data deletion was performed. The source/output hashes still match. GitHub verifies a separately built production container with public fixture/dashboard tests; it cannot test this private video or local model state. See [testing](testing.md) for rerun commands and exact counts.
+
 Silence spans for each source/stem/TTS/mixed track are listed at a -55 dBFS threshold in `audio-quality-report.json`. Leading/trailing TTS padding is measured. There is no all-silent TTS track; these measurements cannot identify every missing word, sound effect, or perceptually unexplained gap.
 
 ## Actual processing cost and long-video readiness

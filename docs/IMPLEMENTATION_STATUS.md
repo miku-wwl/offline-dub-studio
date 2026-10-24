@@ -13,7 +13,7 @@ Validated on 2026-10-24 in the Windows/Docker Desktop workspace. Phase 2.5 uses 
 | Hard subtitle restoration | PARTIAL | Actual Chinese captions processed, timed masks and repair previews exported. Conservative OCR leaves glyphs; OpenCV can smear detail. |
 | English captions | PASS | ASS/SRT, ordered intervals, wrapping/escaping, readable margin above source band and actual burn-in. Translation accuracy remains human reviewed. |
 | Web workflow | PARTIAL | Real API import→review→approve→export→download completed. Browser regressions cover transcript/speaker review and production output playback. The complete model-backed conversion was not initiated entirely with browser actions. |
-| Recovery/cancellation | PASS | Persisted stages/outputs, interrupted-state/cache regressions; separate safe generated fixture for actual API queued cancel/resume/cancel. Active Demucs/render cancellation remains at stage boundaries. |
+| Recovery/cancellation | PARTIAL | Interrupted-state/cache regressions and safe generated-fixture API cancel/resume/cancel pass. The real completed-job post-restart API check is blocked by a Docker Desktop startup/socket failure. Active Demucs/render cancellation remains at stage boundaries. |
 | Security dependencies | PASS | filelock 4.2.1; pip check and vulnerability audit without ignored IDs. Two pinned direct upstream builds lack PyPI audit coverage and are disclosed. |
 | Long-video readiness | PARTIAL | Bounded audio mixing, ROI repair and validated caches help, but Demucs memory, FFV1 disk, stage-boundary cancellation and sample quality still gate two-hour acceptance. |
 | Release/distribution | NOT_RUN | Local image only. No GHCR push, GitHub release, model-term acceptance or full-film execution. MiniSBD transitive licensing remains documented. |
@@ -26,5 +26,6 @@ Validated on 2026-10-24 in the Windows/Docker Desktop workspace. Phase 2.5 uses 
 - Source SHA-256 remains `bb779354520eb5edd040910d970c41471235ad1f2b49e5d3d73abd3e9f1fc4d4`.
 - Evidence directory contains full source/stem/TTS/mixed audio, transcript and visual corrections, speaker proposals, ASS/SRT, mask/repaired/English stills, FFprobe/decode/timestamp/quality reports, each stage attempt, Docker stats, offline firewall proof and audit logs. Media and model weights are excluded from Git/build context.
 - Full automated commands/results are maintained in [testing](testing.md), and the [real-video report](REAL_VIDEO_ACCEPTANCE.md) records actual failures, measured costs, limitations and human review checklist. The final remote commit/run identity is provided in the delivery response and ignored `delivery.json`.
+- Implementation commit `039dae1` passed 46 backend tests, Ruff, Python audits, 1 frontend unit test, typecheck/build and npm audit on GitHub. The final private-output production UI rerun remains blocked by Docker Desktop; direct-file Chromium decoding passes independently. See testing for precise browser scope and recovery limits.
 
 **OVERALL_STATUS=PARTIAL.** Automated mechanical acceptance does not replace listening or visual quality approval. No full-length movie was started.
