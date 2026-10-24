@@ -5,6 +5,7 @@ import App from './App'
 vi.mock('./api', () => ({
   api: {
     health: async () => ({ status: 'ok' }),
+    projectTranslation: async () => ({glossary:{}}),
     models: async () => ({ packs: [], operations: {} }), jobs: async () => ({ jobs: [] }),
     inbox: async () => ({ files: [] }), voices: async () => ({ voices: [] }),
     diagnostics: async () => ({ cpu_count: 4, data_free_bytes: 1, offline_inference: false }),

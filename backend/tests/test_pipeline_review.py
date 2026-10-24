@@ -79,14 +79,14 @@ def test_repair_cache_requires_matching_source_regions_and_output_hash(staged_jo
     report={"mode":"balanced","width":160,"height":90,"fps":10,"frames_processed":10,
             "masked_frames":10,"unmasked_frames":0,"regions":boxes,"mask_applied":True,
             "output_video":str(repaired),"technique":"test-only","source_sha256":module._file_digest(source),
-            "repair_sha256":module._file_digest(repaired)}
+            "repair_sha256":module._file_digest(repaired),'quality_version':module.VERSION,'patch_roi':None}
     (work / "subtitle-report.json").write_text(json.dumps(report),encoding="utf-8")
     monkeypatch.setattr(module,"detect_boxes",lambda *_args:(boxes,[]))
     def no_repair(*_args):
         raise RuntimeError("repair executed")
     monkeypatch.setattr(module,"redact_video",no_repair)
     pipeline=Pipeline(db,lambda:False)
-    state={"work":work,"source":source,"options":JobOptions(subtitle_mode="balanced"),"probe":{"height":90},"segments":[]}
+    state={"work":work,"source":source,"options":JobOptions(subtitle_mode="balanced"),"probe":{"height":90,'fps':'25/1'},"segments":[]}
     pipeline._stage_subtitle_processing(state)
     saved=json.loads((work / "subtitle-report.json").read_text(encoding="utf-8"))
     assert saved["repair_cache_reused"] is True

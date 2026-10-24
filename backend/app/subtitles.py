@@ -34,7 +34,7 @@ def caption_cues(segments: list[dict]) -> list[dict]:
         start,end=float(seg["start"]),float(seg["end"])
         if not math.isfinite(start) or not math.isfinite(end) or start<0 or end<=start:
             raise ValueError(f"Invalid subtitle interval for {seg.get('id','unknown')}")
-        text=" ".join(str(seg.get("translated_text","")).split())
+        text=" ".join(str(seg.get('short_translation') or seg.get("translated_text","")).split())
         if not text:
             continue
         lines=textwrap.wrap(text,width=54,break_long_words=True,break_on_hyphens=False)

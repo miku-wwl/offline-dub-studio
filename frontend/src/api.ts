@@ -2,6 +2,7 @@ export type Stage = { name: string; status: string; progress: number; started_at
 export type Segment = {
   id: string; start: number; end: number; source_text: string; translated_text: string;
   speaker_id: string; asr_quality?: number | null
+  short_translation?: string | null; translation_provenance?: Record<string,unknown>
 }
 export type Speaker = { speaker_id: string; voice_id: string; label?: string }
 export type Job = {
@@ -23,6 +24,7 @@ export type MediaAsset = {
   width: number; height: number; has_audio: boolean; subtitle_streams: number
 }
 export type Voice = { id: string; label: string }
+export type TemporalMask = { start_time:number; end_time:number; x:number; y:number; width:number; height:number }
 export type Diagnostics = { cpu_count: number; data_free_bytes: number; offline_inference: boolean }
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
@@ -57,6 +59,9 @@ export const api = {
   approveSubtitles: (id: string) => request(`/api/v1/jobs/${id}/approve-subtitles`, { method: 'POST' }),
   approveTranscript: (id: string) => request(`/api/v1/jobs/${id}/approve-transcript`, { method: 'POST' }),
   updateRegions: (id: string, regions: [number,number,number,number][]) => request(`/api/v1/jobs/${id}/subtitle-regions`, json('PUT', { regions })),
+  updateTemporalMasks: (id:string,masks:TemporalMask[]) => request(`/api/v1/jobs/${id}/temporal-masks`,json('PUT',{masks})),
+  projectTranslation: () => request<{glossary:Record<string,string>}>('/api/v1/project/translation'),
+  saveProjectTranslation: (glossary:Record<string,string>) => request('/api/v1/project/translation',json('PUT',{glossary})),
   editTranscript: (id: string, segments: unknown) => request<Job>(`/api/v1/jobs/${id}/transcript`, json('PUT', segments)),
   editSpeakers: (id: string, assignments: unknown) => request<Job>(`/api/v1/jobs/${id}/speakers`, json('PUT', { assignments })),
   voices: () => request<{ voices: Voice[] }>('/api/v1/voices'),

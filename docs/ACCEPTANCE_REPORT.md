@@ -1,4 +1,14 @@
-# Phase 2.5 acceptance report
+# Acceptance report
+
+## Phase 2.6 — current quality acceptance
+
+Date: 2026-10-25, Pacific/Auckland. Baseline: `e4f1d7a431688d496bae2623d00045c0f01d0ffd`. **OVERALL_STATUS=PARTIAL.** The new real 60-second job has completed local Small/Argos/Kokoro/Demucs execution and subtitle repair. Its 25 fitted voices have zero collisions over 20 ms (previously nine), maximum 0.000 s (previously 1.085 s), and no end truncation. New ASR segmentation and proposed English edits differ from the old run, so the gains cannot be attributed solely to fitting.
+
+Actual repaired stills at 20/42/54 seconds remove the previously legible Chinese dialogue, while shirt/microphone/hand streaking and bands remain. No human listening or motion-quality approval has occurred. Final MP4 export and production playback/recovery remain pending Docker Desktop recovery; startup currently fails on existing socket files, whose deletion requires explicit approval under the task instructions. This is separate from the earlier successful builds and completed upstream inference.
+
+Validation so far: 70 backend tests, Ruff, one frontend unit test, typecheck/build and security audits pass; fixture browser tests are 3 passed / 2 skipped. The final output must still be verified as 48 kHz stereo. Protected original, clip and Phase 2.5 evidence remain separate from new ignored artifacts. See [the detailed Phase 2.6 report](PHASE26_QUALITY_REPORT.md) for measured evidence, limitations, failure/retry history and the remaining acceptance boundary.
+
+## Historical Phase 2.5 acceptance
 
 Validation date: 2026-10-24, Pacific/Auckland. Baseline: `1b873652f9f608afb34f10d461c8ddfe156217f7`.
 

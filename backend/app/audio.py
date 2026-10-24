@@ -9,7 +9,7 @@ import numpy as np
 import soundfile as sf
 
 
-SAMPLE_RATE = 24000
+SAMPLE_RATE = 48000
 
 
 def compose_timeline(segments: list[dict], voice_files: dict[str, Path], duration: float,
@@ -44,6 +44,13 @@ def compose_timeline(segments: list[dict], voice_files: dict[str, Path], duratio
                             "generated_end":(offset+info.frames)/SAMPLE_RATE,"generated_duration":info.duration,
                             "overflow_seconds":max(0,info.frames-slot)/SAMPLE_RATE,
                             "collision_seconds":collision,"truncated_seconds":truncated})
+        previous=[s for s in segments if float(s['start'])<float(seg['start'])]
+        source_overlap=max([0]+[float(s['end'])-float(seg['start']) for s in previous])
+        diagnostics[-1].update({'available_duration':seg.get('timing_budget',{}).get('available_duration',slot/SAMPLE_RATE),
+            'collision_duration':collision,'overflow_duration':max(0,info.frames-slot)/SAMPLE_RATE,
+            'source_overlap_seconds':source_overlap,'unintended_collision_seconds':max(0,collision-source_overlap),
+            'adjustment_strategy':seg.get('adjustment_strategy','none'),
+            'overlap_classification':'source-interval-overlap-needs-listening' if source_overlap else 'rounding' if collision<=.02 else 'tts-duration-overflow'})
         tracks.append((offset,info.frames,path))
     peak=0.0
     # A float scratch WAV preserves peaks until a second streaming normalization

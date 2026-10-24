@@ -1,5 +1,27 @@
 # Implementation status
 
+## Phase 2.6 — 2026-10-25
+
+| Area | Status | Current evidence and limits |
+|---|---|---|
+| Outlined Chinese detection | PASS | Actual line boxes cover 20/42/54 s; scene-aware anchors and per-frame presence checks, 1,223 masked / 277 inactive frames. This is sampled recall evidence. |
+| Explicit timed masks | PASS | Validated finite video-bounded intervals/coordinates; independent of OCR; exact boundaries and an interval crossing a scene cut covered by regression and browser form/drag fixtures. |
+| Subtitle reconstruction | PARTIAL | The three actual repaired stills remove legible dialogue text; visible shirt/microphone/hand streaking and bands remain. |
+| Glossary/editor | PASS | Configurable project settings, new-job snapshots, protected terms/fallback, context, full/short edits, provenance and cache invalidation covered. Argos grammar is still imperfect. |
+| Translation quality | PARTIAL | Actual glossary-assisted Argos plus Codex-proposed English edits; no human translation approval or scene-wide contextual model. |
+| Dialogue fitting | PASS | Actual 25-segment timeline: zero >20 ms collisions, max 0.000 s, zero tail truncation. Segmentation and editorial edits differ from Phase 2.5. Naturalness remains pending. |
+| Speaker/background quality | PENDING_HUMAN_REVIEW | Stable proposed voice mapping and real Demucs stems do not prove speaker identity or cinematic background preservation. |
+| 48 kHz output | PARTIAL | Implemented and tested actual generated 48 kHz stereo render; real fitted voices are 48 kHz. Private final MP4 is pending export. |
+| Real 60-second pipeline | PARTIAL | All real local inference and repair completed; final export paused at review before host Docker socket startup failure. |
+| Recovery | PARTIAL | Old completed job/API/download passed earlier after recreation; current Docker startup is blocked, and new completed-output restart check remains pending. No runtime state was deleted. |
+| Automated validation | PASS | 70 backend tests, Ruff, one frontend unit test, typecheck/build, 3 fixture browser passes (2 production/private skips), Python/npm audits. |
+| Long-film readiness | PARTIAL | Bounded strip bank and mixing reduce costs, but no full-film run, human approval or artifact-free restoration. |
+| Publication | NOT_RUN | No GHCR publication or release; code/main CI delivery is tracked separately from private acceptance. |
+
+See [the Phase 2.6 quality report](PHASE26_QUALITY_REPORT.md) for actual job IDs, preserved hashes, review provenance, failures/retries and remaining work. The following Phase 2.5 section is retained as historical evidence.
+
+## Historical Phase 2.5
+
 Validated on 2026-10-24 in the Windows/Docker Desktop workspace. Phase 2.5 uses the actual supplied `test.webm`; earlier FLEURS fixture results are historical. `PASS` applies to the specifically measured behavior.
 
 | Area | Status | Evidence and remaining work |

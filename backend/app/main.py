@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import mimetypes
+import math
 import os
+import subprocess
 import shutil
 import tempfile
 import threading
@@ -13,12 +15,12 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
 
 from .config import effective_cpu_count, settings
 from .db import Database, now
-from .domain import JobOptions, SegmentEdit, SpeakerEdit
+from .domain import JobOptions, SegmentEdit, SpeakerEdit, TemporalMask, TranslationSettings
 from .manager import JobManager
 from .media import MediaError, probe_media, require_tools
 from .models import MODEL_PACKS, initialize, list_packs
@@ -63,6 +65,31 @@ class RetryStage(BaseModel):
 
 class SubtitleRegions(BaseModel):
     regions: list[tuple[int,int,int,int]]
+
+
+class TemporalMasks(BaseModel):
+    masks: list[TemporalMask] = Field(max_length=1000)
+
+
+def _validate_video_regions(options, width, height, duration):
+    for mask in options.temporal_masks:
+        if mask.end_time>duration or mask.x+mask.width>width or mask.y+mask.height>height:
+            raise HTTPException(422,'Temporal mask must fit within the video dimensions and duration.')
+    for x,y,w,h in options.subtitle_regions:
+        if x<0 or y<0 or w<2 or h<2 or x+w>width or y+h>height:
+            raise HTTPException(422,'Subtitle search region must fit inside the video.')
+
+
+@app.get('/api/v1/project/translation')
+def project_translation():
+    path=settings.data_dir / 'project-translation.json'
+    return TranslationSettings.model_validate_json(path.read_text()) if path.exists() else TranslationSettings()
+
+
+@app.put('/api/v1/project/translation')
+def update_project_translation(request:TranslationSettings):
+    (settings.data_dir / 'project-translation.json').write_text(request.model_dump_json(indent=2),encoding='utf-8')
+    return request
 
 
 @app.get("/api/v1/health")
@@ -237,6 +264,9 @@ def create_job(request:CreateJob):
     if missing:
         raise HTTPException(409,"Initialize the required local model packs before conversion: "+", ".join(missing))
     media=_asset(request.asset_id)
+    media_probe=media['probe']
+    _validate_video_regions(request.options,media_probe['width'],media_probe['height'],media_probe['duration'])
+    request.options.translation_glossary={**project_translation().glossary,**request.options.translation_glossary}
     job_id=str(uuid.uuid4())
     work=settings.jobs_dir / job_id
     work.mkdir(parents=True,exist_ok=True)
@@ -421,10 +451,28 @@ def edit_transcript(job_id:str,segments:list[SegmentEdit]):
             raise HTTPException(422,f"Segment {segment.id} has an invalid time interval.")
     path=settings.jobs_dir / job_id / "transcript.json"
     payload={"segments":[s.model_dump() for s in segments],"provider":"user-edited"}
+    source_changed=False
     if path.exists():
         old=json.loads(path.read_text(encoding="utf-8"))
+        previous={s['id']:s for s in old.get('segments',[])}
         payload.update(old)
         payload["segments"]=[s.model_dump() for s in segments]
+        from hashlib import sha256
+        for row in payload['segments']:
+            prior=previous.get(row['id'],{})
+            changed_source=row['source_text']!=prior.get('source_text')
+            source_changed=source_changed or changed_source
+            changed_english=any(row.get(k)!=prior.get(k) for k in ('translated_text','short_translation'))
+            if any(row.get(k)!=prior.get(k) for k in ('source_text','translated_text','short_translation')):
+                row['translation_provenance']={**prior.get('translation_provenance',{}),
+                    'manual_override':{'full':row['translated_text'],'short':row.get('short_translation'),
+                        'previous_text':prior.get('translated_text'),'edited_at':now(),'actor':'local-review-client'},
+                    'source_sha256':sha256(row['source_text'].encode()).hexdigest(),'human_approved':False}
+                if changed_source and not changed_english:
+                    row['translation_provenance'].pop('manual_override',None)
+                    row['translation_provenance']['source_edit']={'before':prior.get('source_text'),'after':row['source_text'],'edited_at':now()}
+            else:
+                row['translation_provenance']=prior.get('translation_provenance',{})
         payload["edited_at"]=now()
     path.write_text(json.dumps(payload,ensure_ascii=False,indent=2),encoding="utf-8")
     default_voices=["af_heart","af_bella","am_adam","af_nicole","am_michael"]
@@ -435,8 +483,33 @@ def edit_transcript(job_id:str,segments:list[SegmentEdit]):
                    (job_id,speaker_id,existing.get(speaker_id,default_voices[index%len(default_voices)])))
     for speaker_id in set(existing)-set(speaker_ids):
         db.execute("DELETE FROM speakers WHERE job_id=? AND speaker_id=?",(job_id,speaker_id))
-    _requeue_edited_job(job_id,["synthesize","subtitle_processing","render"],"Transcript edits saved; downstream audio/subtitle stages queued.")
+    if source_changed:
+        row=db.one('SELECT options_json FROM jobs WHERE id=?',(job_id,))
+        options=json.loads(row['options_json'])
+        options['transcript_review_approved']=False
+        db.execute('UPDATE jobs SET options_json=? WHERE id=?',(json.dumps(options),job_id))
+    _requeue_edited_job(job_id,(["translate"] if source_changed else [])+["synthesize","subtitle_processing","render"],"Transcript edits saved; affected translation/audio/subtitle stages queued.")
     return _job_detail(job_id)
+
+
+@app.put('/api/v1/jobs/{job_id}/temporal-masks')
+def update_temporal_masks(job_id:str, request:TemporalMasks):
+    row=db.one('SELECT status,options_json FROM jobs WHERE id=?',(job_id,))
+    if not row:
+        raise HTTPException(404,'Job not found')
+    if row['status'] in {'running','queued','cancelling'}:
+        raise HTTPException(409,'Wait for processing to stop before editing masks.')
+    inspection=settings.jobs_dir / job_id / 'inspection.json'
+    if not inspection.exists():
+        raise HTTPException(409,'Video inspection is not available.')
+    info=json.loads(inspection.read_text())
+    options=JobOptions.model_validate_json(row['options_json'])
+    options.temporal_masks=request.masks
+    _validate_video_regions(options,info['width'],info['height'],info['duration'])
+    options.subtitle_review_approved=False
+    db.execute('UPDATE jobs SET options_json=? WHERE id=?',(options.model_dump_json(),job_id))
+    _requeue_edited_job(job_id,['subtitle_processing','render'],'Explicit time-bounded masks updated; new preview required.')
+    return {'id':job_id,'status':'queued'}
 
 
 @app.put("/api/v1/jobs/{job_id}/speakers")
@@ -514,6 +587,21 @@ def preview(job_id:str,name:str):
     if not path.is_file():
         raise HTTPException(404,"Preview is not ready")
     return FileResponse(path,media_type="image/png")
+
+
+@app.get('/api/v1/jobs/{job_id}/preview-frame')
+def preview_frame(job_id:str,time:float=0):
+    row=db.one('SELECT input_path FROM jobs WHERE id=?',(job_id,))
+    if not row:
+        raise HTTPException(404,'Job not found')
+    info=probe_media(Path(row['input_path']))
+    if not math.isfinite(time) or time<0 or time>=info['duration']:
+        raise HTTPException(422,'Preview time must be within the source video.')
+    frame=subprocess.run([settings.ffmpeg,'-v','error','-ss',str(time),'-i',row['input_path'],
+        '-frames:v','1','-f','image2pipe','-c:v','png','pipe:1'],capture_output=True,timeout=30)
+    if frame.returncode or not frame.stdout:
+        raise HTTPException(422,'Could not decode the requested source frame.')
+    return Response(frame.stdout,media_type='image/png')
 
 
 @app.get("/api/v1/jobs/{job_id}/logs")

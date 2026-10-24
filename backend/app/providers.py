@@ -105,7 +105,7 @@ class ASRProvider:
 
 
 class TranslationProvider:
-    def translate(self, segments: list[dict], source: str, target: str) -> dict:
+    def translate(self, segments: list[dict], source: str, target: str, glossary: dict[str,str] | None=None) -> dict:
         if source == target:
             for seg in segments:
                 seg["translated_text"] = seg["source_text"]
@@ -122,13 +122,22 @@ class TranslationProvider:
             raise ProviderUnavailable(f"Initialize the local {from_code} to {to_code} Argos package first.")
         configure_local_argos_splitter(installed)
         count = 0
-        for seg in segments:
+        from .translation import translate_with_glossary
+        for index,seg in enumerate(segments):
             text = seg["source_text"]
+            from hashlib import sha256
+            prior=seg.get('translation_provenance',{})
+            if prior.get('manual_override') and prior.get('source_sha256')==sha256(text.encode()).hexdigest():
+                continue
             if not any("\u3400" <= c <= "\u9fff" for c in text):
                 seg["translated_text"] = text
             else:
                 # Each ASR chunk retains its own ID and original interval.
-                seg["translated_text"] = installed.translate(text)
+                seg["translated_text"],provenance = translate_with_glossary(installed,text,glossary or {})
+                provenance['neighbor_context']=[{'id':s.get('id'),'speaker_id':s.get('speaker_id'),
+                    'source_text':s['source_text']} for s in segments[max(0,index-1):index+2]]
+                provenance['context_use']='Exposed for manual sentence/continuation review; Argos remains segment-based.'
+                seg['translation_provenance']=provenance
                 count += 1
         return {"provider":"argos-translate","from":from_code,"to":to_code,"translated":count}
 

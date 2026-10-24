@@ -1,4 +1,18 @@
-# Phase 2.5 real-video acceptance
+# Real-video acceptance
+
+## Phase 2.6 — new independent run
+
+Date: 2026-10-25, Pacific/Auckland. New job `dc04452a-410e-425f-b950-afe1a7a86895` uses the same preserved source seconds 10–70 and existing `data/inbox/test-60s.mp4`. Evidence is written only under `data/acceptance/phase-2.6/`; the previous job/output and its evidence remain preserved. The source, input and previous MP4 SHA-256 values below still identify the protected files.
+
+Real Balanced CPU Small ASR, Argos, Kokoro and Demucs ran through the normal API. The new ASR produced 25 segments; seven caption-grounded source corrections, 25 proposed English edits, eight shorter variants and three stable voice assignments are separately recorded. This is engineering review, with human translation/speaker approval pending. Project glossary terms work, but raw Argos grammar remains imperfect. Actual synthesis reports zero collisions over 20 ms and zero unintended collisions over 100 ms, maximum 0.000 s and no final tail truncation. Raw 24 kHz and fitted 48 kHz voices are retained.
+
+The subtitle repair completed all 1,500 frames (1,223 masked, 277 inactive). Actual pre-burn repaired stills at 20/42/54 seconds remove the old legible dialogue captions but exhibit shirt/microphone/hand smears and bands. OCR or pixel integrity does not establish perceptual quality. The 148,910,513-byte lossless subtitle strip replaces the previous 1,029,431,357-byte full-frame intermediate.
+
+The job reached `awaiting_review` before Docker Desktop subsequently stopped. Current normal startup fails on `sailor-ingest.sock` / `.stale`; no socket/runtime deletion is authorized yet. Final engineering export, the required `dubbed-60s-v26.mp4`, post-export audio/media metrics and production browser/restart validation remain pending. Earlier in this phase the old completed job's full API record and downloaded SHA matched the protected baseline after a container recreation. That earlier pass does not prove current runtime health.
+
+See [PHASE26_QUALITY_REPORT.md](PHASE26_QUALITY_REPORT.md), [testing](testing.md) and the local `comparisons/{20,42,54}/repair-review.png` files for current Phase 2.6 scope. The final collector creates actual source/old/new MP4 comparisons after export; development candidate images are not final outputs. **Phase 2.6 OVERALL_STATUS=PARTIAL**, with human audio/video review pending and no full-film conversion.
+
+## Historical Phase 2.5 run
 
 Date: 2026-10-24, Pacific/Auckland. Baseline: `1b873652f9f608afb34f10d461c8ddfe156217f7`.
 

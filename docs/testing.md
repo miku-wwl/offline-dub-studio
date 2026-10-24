@@ -1,5 +1,44 @@
 # Testing
 
+## Phase 2.6 quality workflow
+
+Phase 2.5 results below are historical. Phase 2.6 uses a new job and ignored `data/acceptance/phase-2.6/`, preserving the original source, input clip, all previous evidence and completed job records. See [PHASE26_QUALITY_REPORT.md](PHASE26_QUALITY_REPORT.md) for measured final results and comparison limits.
+
+Current local Phase 2.6 results: **70 backend tests passed** (one Starlette/httpx deprecation warning), Ruff passed, **one frontend unit test passed**, typecheck/build passed, **three fixture browser tests passed / two production-private tests skipped**. Python installed-graph and official-registry npm vulnerability checks passed with the documented upstream-build audit gaps. Production/test image builds passed before the subsequent Docker Desktop socket failure. Final private-output browser/restart checks and the post-export collector remain pending; CI results must be tied to the delivered commit, not the Phase 2.5 run.
+
+The new regressions cover finite/bounded explicit mask intervals, actual outlined Chinese recognition on white backgrounds, subtitle appearance/disappearance, a moving object, negative/positive tracking caches, scene resets, active masks crossing a cut, exact unmasked pixels in the lossless strip, project glossary snapshots, corrupted glossary markers, translation override provenance, source-edit invalidation, duration budgets, bounded fitting, 24→48 kHz resampling, actual FFmpeg 48 kHz stereo export, limiter sample alignment, and acceptance-report preservation/collision helpers. Existing tests remain enabled.
+
+```powershell
+docker build --pull=false --target runtime --tag ghcr.io/miku-wwl/offline-dub-studio:local .
+docker compose up -d --force-recreate --no-deps dub-studio
+docker build --pull=false --target test --tag ghcr.io/miku-wwl/offline-dub-studio:phase26-test .
+docker run --rm --network none --env DATA_DIR=/tmp/p26-tests --env MODELS_DIR=/tmp/p26-models ghcr.io/miku-wwl/offline-dub-studio:phase26-test
+docker run --rm --entrypoint python ghcr.io/miku-wwl/offline-dub-studio:phase26-test scripts/audit_dependencies.py
+docker exec offline-dub-studio python -m pip check
+Set-Location frontend
+npm test
+npm run typecheck
+npm run build
+$env:LIVE_APP_URL='http://127.0.0.1:7860'
+$env:LIVE_ACCEPTANCE_JOB_ID='dc04452a-410e-425f-b950-afe1a7a86895'
+npm run test:e2e
+npm audit --registry=https://registry.npmjs.org --audit-level=high
+```
+
+Project terminology: `GET/PUT /api/v1/project/translation` with `{"glossary":{"旗手":"flag bearer"}}`. New jobs snapshot the current glossary, with per-job `translation_glossary` taking precedence. Editing project settings does not mutate a running job's snapshot. `PUT /jobs/{id}/transcript` accepts optional `short_translation`; this selected version is spoken and captioned. Original Argos text, source edits, full/short overrides and local-editor provenance remain recorded, with human approval separate. A source-only edit invalidates translation and later stages, removes a stale manual lock and resets transcript approval. English/speaker edits invalidate generated speech and later affected artifacts.
+
+Explicit masks: `PUT /api/v1/jobs/{id}/temporal-masks` with `{"masks":[{"start_time":20,"end_time":21,"x":650,"y":970,"width":650,"height":80}]}`. Coordinates must fit the actual input and intervals are half-open, finite and within duration. These are forced masks, independent of OCR. The existing `/subtitle-regions` endpoint remains a search constraint. `GET /jobs/{id}/preview-frame?time=20` returns the actual source PNG for selection. Both mask edits invalidate the subtitle/render stages and require a new preview approval.
+
+Stage receipts record dependency fingerprints and immutable output hashes. Editable reviewed transcripts have an independent raw-ASR copy; changed source, text, voice, duration budget, style, masks or algorithm version invalidate relevant work. Subtitle OCR additionally checks source SHA/ROI/version; repair reuse checks source, intervals, mode, version and output SHA. No corrupted/replaced repair cache is accepted by the regression.
+
+The Phase 2.6 collector performs no inference and is run only after the actual API job completes:
+
+```powershell
+docker run --rm --network none --entrypoint python --volume 'D:\workshop\oct\offline-dub-studio:/workspace:ro' --volume 'D:\workshop\oct\offline-dub-studio\data:/data' --env PYTHONPATH=/workspace/backend ghcr.io/miku-wwl/offline-dub-studio:local /workspace/scripts/compare_quality.py --job-id dc04452a-410e-425f-b950-afe1a7a86895 --evidence /data/acceptance/phase-2.6 --source /workspace/test.webm --clip /data/inbox/test-60s.mp4 --previous /data/acceptance/phase-2.5/dubbed-60s.mp4 --expected-source-sha256 bb779354520eb5edd040910d970c41471235ad1f2b49e5d3d73abd3e9f1fc4d4
+```
+
+It checks all protected Phase 2.5 hashes, the source/snapshot, complete output decode, codecs/rate/channels/fps/duration/DTS, non-silent and consistently assigned voices, audio levels and detailed timing. It reconstructs each pre-burn frame from the original plus the lossless strip and compares every unmasked pixel. Actual source/old/new frames at 20/42/54 seconds and readable comparison crops are exported. OCR cannot establish natural reconstruction; human review remains required. CI intentionally excludes private video/models; local private-output E2E and recovery checks must be recorded separately.
+
 ## Automated checks
 
 The backend tests cover owned upload/snapshot cleanup, invalid/unsupported/interrupted inbox preservation, unchanged import hashes, collision-safe publication, temporal Chinese OCR across scene changes and moving objects, pixel-identical inactive frames, ASS/SRT timing and wrapping, bounded audio mixing and truncation diagnostics, OpenMP isolation, empty-ASR failures, speaker edits, review gates, cancellation, and cached stage recovery. Frontend tests cover dashboard rendering; Playwright opens the UI in Chromium with API fixtures. Those fixture-driven browser checks do not prove a real full conversion.

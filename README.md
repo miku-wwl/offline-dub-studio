@@ -2,7 +2,7 @@
 
 Local-first Chinese-to-English video dubbing. The application combines local CPU speech recognition, Argos translation, Kokoro English voices, an optional Demucs music-vocal split, editable speaker assignments, hard-subtitle review/inpainting, and English subtitle burn-in.
 
-> Phase 2.5 adds safe inbox snapshots, temporal subtitle masks, transcript/speaker review before TTS, SRT export, and a reproducible real-video acceptance workflow. See [real-video acceptance](docs/REAL_VIDEO_ACCEPTANCE.md) for the supplied `test.webm` run and its evidence. Subjective audio/video quality requires human review; full-film processing remains gated on that review. No GHCR image has been published. The runtime image is several GB because it includes CPU PyTorch and FFmpeg.
+> Phase 2.6 adds explicit time-bounded subtitle masks, outlined-caption line detection, scene-local restoration, project terminology, shorter reviewed translations, duration-aware speech fitting, and 48 kHz stereo exports. See the [quality report](docs/PHASE26_QUALITY_REPORT.md) and [real-video acceptance](docs/REAL_VIDEO_ACCEPTANCE.md). Voice identity, naturalness, translation fidelity, background preservation and subtitle reconstruction need human review. Full-film processing remains gated on the sample. No GHCR image has been published. The runtime image is several GB because it includes CPU PyTorch and FFmpeg.
 
 ## Quick start on Windows 11
 

@@ -1,5 +1,5 @@
 import { ChangeEvent, PointerEvent as ReactPointerEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { api, Diagnostics, Job, JobSummary, MediaAsset, ModelPack, Segment, Voice } from './api'
+import { api, Diagnostics, Job, JobSummary, MediaAsset, ModelPack, Segment, Voice, TemporalMask } from './api'
 
 const required = ['translation-zh-en', 'tts-kokoro-en', 'separation-htdemucs']
 const stageNames: Record<string, string> = {
@@ -42,6 +42,11 @@ export default function App() {
   const [selection, setSelection] = useState<[number,number,number,number] | null>(null)
   const imageRef = useRef<HTMLImageElement>(null)
   const dragStart = useRef<[number,number] | null>(null)
+  const [glossaryText,setGlossaryText] = useState('{}')
+  const [previewTime,setPreviewTime] = useState(0)
+  const [maskStart,setMaskStart] = useState(0)
+  const [maskEnd,setMaskEnd] = useState(1)
+  useEffect(() => { api.projectTranslation().then(x=>setGlossaryText(JSON.stringify(x.glossary||{},null,2))).catch(()=>{}) },[])
 
   const refresh = useCallback(async () => {
     try {
@@ -102,6 +107,7 @@ export default function App() {
         voice_assignments: { 'speaker_1': 'af_heart' },
         subtitle_font_size: subtitleFontSize, subtitle_margin_v: subtitleMarginV,
         dialogue_gain_db: dialogueGainDb, background_gain_db: backgroundGainDb,
+        translation_glossary:JSON.parse(glossaryText),
       })
       setSelectedId(result.id); setAsset(null)
     })
@@ -121,18 +127,21 @@ export default function App() {
   }
   function regionPoint(event: ReactPointerEvent<HTMLDivElement>): [number,number] | null {
     const image = imageRef.current
-    if (!image) return null
+    if (!image || !image.naturalWidth || !image.naturalHeight) return null
     const rect = image.getBoundingClientRect()
-    return [Math.round((event.clientX-rect.left)/rect.width*image.naturalWidth),
-      Math.round((event.clientY-rect.top)/rect.height*image.naturalHeight)]
+    return [Math.max(0,Math.min(image.naturalWidth,Math.round((event.clientX-rect.left)/rect.width*image.naturalWidth))),
+      Math.max(0,Math.min(image.naturalHeight,Math.round((event.clientY-rect.top)/rect.height*image.naturalHeight)))]
   }
   function startRegion(event: ReactPointerEvent<HTMLDivElement>) {
     const point=regionPoint(event); if (!point) return
+    event.preventDefault()
+    event.currentTarget.setPointerCapture(event.pointerId)
     dragStart.current=point; setSelection(null)
   }
   function finishRegion(event: ReactPointerEvent<HTMLDivElement>) {
     if (!dragStart.current) return
     const point=regionPoint(event); if (!point) return
+    if(event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
     const [x0,y0]=dragStart.current; const [x1,y1]=point; dragStart.current=null
     const region:[number,number,number,number]=[Math.min(x0,x1),Math.min(y0,y1),Math.abs(x1-x0),Math.abs(y1-y0)]
     if (region[2]>2 && region[3]>2) setSelection(region)
@@ -141,6 +150,13 @@ export default function App() {
     if (!selectedJob) return
     const next=selection ? [...regions,selection] : regions
     await runAction('Rebuilding subtitle preview', async () => { await api.updateRegions(selectedJob.id,next); setRegions(next); setSelection(null) })
+  }
+  async function addTimedMask() {
+    if (!selectedJob || !selection) return
+    const [x,y,width,height]=selection
+    const previous=(selectedJob.options.temporal_masks||[]) as TemporalMask[]
+    await runAction('Updating timed masks',()=>api.updateTemporalMasks(selectedJob.id,[...previous,{start_time:maskStart,end_time:maskEnd,x,y,width,height}]))
+    setSelection(null)
   }
 
   return <main className="shell">
@@ -173,6 +189,8 @@ export default function App() {
         {asset && <div className="asset-preview"><div><b>{asset.display_name}</b><span>{prettyDuration(asset.duration)} · {asset.width} × {asset.height} · {asset.has_audio ? 'audio found' : 'no audio'}</span></div><button className="text-button" onClick={() => setAsset(null)}>Remove</button></div>}
         <div className="settings-row">
           <label>Processing profile<select value={profile} onChange={e => setProfile(e.target.value)}><option value="cpu-lite">CPU Lite · smallest ASR pack</option><option value="balanced">Balanced · small ASR pack</option></select></label>
+          <label>Project glossary (JSON: source term to English)<textarea aria-label="Project glossary" value={glossaryText} onChange={e=>setGlossaryText(e.target.value)} /></label>
+          <button type="button" className="button subtle" disabled={Boolean(busy)} onClick={()=>void runAction('Saving project glossary',()=>api.saveProjectTranslation(JSON.parse(glossaryText)))}>Save project glossary</button>
           <label>Chinese subtitle handling<select value={subtitleMode} onChange={e => setSubtitleMode(e.target.value)}><option value="fast">Fast · OpenCV inpainting</option><option value="balanced">Balanced · OpenCV inpainting</option><option value="none">Leave hard subtitles</option></select></label>
         </div>
         <details className="output-settings"><summary>Subtitle and audio settings</summary><div className="settings-row">
@@ -228,8 +246,8 @@ export default function App() {
         <div className="review-heading"><div><p className="eyebrow">REVIEW BEFORE EXPORT</p><h3>Check subtitle removal</h3><p>Drag over the subtitle area to set an OCR search region. Only frames with detected Chinese text are masked. Review the repair before approving the final MP4.</p></div>
           {selectedJob.status==='awaiting_review' && <button className="button dark" disabled={Boolean(busy)} onClick={() => void runAction('Approving export',() => api.approveSubtitles(selectedJob.id))}>Looks good · export MP4 <span>→</span></button>}
         </div>
-        <div className="review-grid"><figure><div className="image-select" onPointerDown={startRegion} onPointerUp={finishRegion}>
-          <img ref={imageRef} src={`/api/v1/jobs/${selectedJob.id}/preview/subtitle-original.png`} alt="Source video frame. Drag to select another subtitle region." />
+        <div className="review-grid"><figure><div className="image-select" onPointerDown={startRegion} onPointerUp={finishRegion} onPointerCancel={()=>{dragStart.current=null}}>
+          <img draggable={false} ref={imageRef} src={`/api/v1/jobs/${selectedJob.id}/preview-frame?time=${previewTime}`} alt="Source video frame. Drag to select another subtitle region." />
           {regions.map(([x,y,w,h],i)=><span key={i} className="region-box" style={{left:`${(x/(imageRef.current?.naturalWidth||1))*100}%`,top:`${(y/(imageRef.current?.naturalHeight||1))*100}%`,width:`${(w/(imageRef.current?.naturalWidth||1))*100}%`,height:`${(h/(imageRef.current?.naturalHeight||1))*100}%`}} />)}
           {selection && <span className="region-box selected-region" style={{left:`${(selection[0]/(imageRef.current?.naturalWidth||1))*100}%`,top:`${(selection[1]/(imageRef.current?.naturalHeight||1))*100}%`,width:`${(selection[2]/(imageRef.current?.naturalWidth||1))*100}%`,height:`${(selection[3]/(imageRef.current?.naturalHeight||1))*100}%`}} />}
         </div><figcaption>Source frame · drag to add a removal region</figcaption></figure>
@@ -239,6 +257,14 @@ export default function App() {
           {selection && <button className="text-button" onClick={()=>setSelection(null)}>Discard selection</button>}
           <button className="button outline" disabled={active(selectedJob.status) || Boolean(busy) || (!selection && selectedJob.status!=='awaiting_review')} onClick={()=>void applyRegions()}>{selection?'Add region and rebuild preview':'Rebuild preview'}</button>
         </div>
+        <div className="form-grid">
+          <label>Source preview time (seconds)<input type="number" min="0" step="0.04" value={previewTime} onChange={e=>setPreviewTime(Number(e.target.value))}/></label>
+          <label>Mask start (seconds)<input type="number" min="0" step="0.04" value={maskStart} onChange={e=>setMaskStart(Number(e.target.value))}/></label>
+          <label>Mask end (seconds)<input type="number" min="0" step="0.04" value={maskEnd} onChange={e=>setMaskEnd(Number(e.target.value))}/></label>
+          <button className="button subtle" disabled={!selection||Boolean(busy)||active(selectedJob.status)} onClick={()=>void addTimedMask()}>Add explicit timed mask</button>
+        </div>
+        <p>Explicit masks apply to the selected rectangle only during their time interval, even when OCR misses the text. Inspect the repair for artifacts.</p>
+        {((selectedJob.options.temporal_masks||[]) as TemporalMask[]).map((m,index)=><p key={index}>Mask {m.start_time}–{m.end_time}s · {m.x},{m.y} · {m.width}×{m.height} <button disabled={Boolean(busy)||active(selectedJob.status)} onClick={()=>void runAction('Removing timed mask',()=>api.updateTemporalMasks(selectedJob.id,((selectedJob.options.temporal_masks||[]) as TemporalMask[]).filter((_,i)=>i!==index)))}>Remove timed mask</button></p>)}
         {selectedJob.subtitle_report?.warnings?.map(w=><div className="warning" key={w}>Review: {w}</div>)}
       </section>}
       {selectedJob.stages.some(stage => stage.name==='subtitle_processing' && stage.status==='completed') && selectedJob.options.subtitle_mode==='none' && <section className="subtitle-review">
@@ -259,7 +285,11 @@ export default function App() {
         <section><div className="editor-head"><div><h3>Dialogue and subtitle editor</h3><p>Correct translations and speaker IDs. Saving re-runs only TTS and later stages.</p></div><button className="button primary" disabled={savingTranscript || active(selectedJob.status)} onClick={() => void saveTranscript()}>{savingTranscript ? 'Saving…' : 'Save dialogue'}</button></div>
           <div className="segment-list">{editSegments.map((segment,index) => <div className="segment-row" key={segment.id}>
             <div className="segment-index"><span>{String(index+1).padStart(2,'0')}</span><div className="segment-times"><label>In<input aria-label={`Segment ${index+1} start time`} type="number" min="0" step="0.1" value={segment.start} onChange={e => setEditSegments(rows => rows.map(s => s.id===segment.id ? {...s,start:Number(e.target.value)}:s))} /></label><label>Out<input aria-label={`Segment ${index+1} end time`} type="number" min="0" step="0.1" value={segment.end} onChange={e => setEditSegments(rows => rows.map(s => s.id===segment.id ? {...s,end:Number(e.target.value)}:s))} /></label></div></div>
-            <div className="segment-fields"><label>Mandarin source<textarea value={segment.source_text} onChange={e => setEditSegments(rows => rows.map(s => s.id===segment.id ? {...s,source_text:e.target.value}:s))} /></label><label>English dub and subtitle<textarea value={segment.translated_text} onChange={e => setEditSegments(rows => rows.map(s => s.id===segment.id ? {...s,translated_text:e.target.value}:s))} /></label></div>
+            <div className="segment-fields"><label>Mandarin source<textarea value={segment.source_text} onChange={e => setEditSegments(rows => rows.map(s => s.id===segment.id ? {...s,source_text:e.target.value}:s))} /></label><label>English dub and subtitle<textarea value={segment.translated_text} onChange={e => setEditSegments(rows => rows.map(s => s.id===segment.id ? {...s,translated_text:e.target.value}:s))} /></label>
+              <label>Optional shorter English (spoken and captioned)<textarea aria-label="Short translation" value={segment.short_translation||''} onChange={e=>setEditSegments(rows=>rows.map(s=>s.id===segment.id?{...s,short_translation:e.target.value||null}:s))}/></label>
+              <details><summary>Neighboring dialogue for review</summary><p>{editSegments.slice(Math.max(0,index-1),index+2).map(s=>`${s.speaker_id}: ${s.source_text}`).join(' / ')}</p><p>Keep important meaning and names. Shorter wording needs human review.</p></details>
+              <p>Estimated speech: {((segment.short_translation||segment.translated_text).trim().split(/\s+/).filter(Boolean).length/2.7).toFixed(1)}s · available: {Math.max(.05,(editSegments[index+1]?.start < segment.end ? segment.end : editSegments[index+1]?.start ?? selectedJob.media_info?.duration ?? segment.end)-segment.start).toFixed(1)}s. Source interval overlap needs listening review.</p>
+            </div>
             <label className="speaker-field">Speaker<input value={segment.speaker_id} onChange={e => setEditSegments(rows => rows.map(s => s.id===segment.id ? {...s,speaker_id:e.target.value}:s))} /></label>
           </div>)}</div>
         </section>
